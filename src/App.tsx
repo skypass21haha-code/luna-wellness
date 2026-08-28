@@ -6,10 +6,10 @@ import {
   BookHeart,
   CalendarDays,
   ChevronRight,
-  CircleUserRound,
   Heart,
   Home,
   Leaf,
+  LogOut,
   Menu,
   Moon,
   Pill,
@@ -74,9 +74,19 @@ function NotificationStatus() {
         setMessage('Notifications enabled ✓ A test notification was sent.')
       } else if (permission === 'denied') {
         setMessage('Notifications are blocked. Allow LUNA in your browser or device settings, then try again.')
+      } else {
+        setMessage('Notification permission was not granted. You can try again whenever you are ready.')
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'LUNA could not enable notifications.')
+      const currentPermission = getNotificationDiagnostics().permission
+      setDiagnostics(getNotificationDiagnostics())
+      setMessage(
+        currentPermission === 'denied'
+          ? 'Notifications are blocked. Allow LUNA in your browser or device settings, then try again.'
+          : error instanceof Error
+            ? error.message
+            : 'LUNA could not enable notifications right now.',
+      )
     }
   }
 
@@ -85,7 +95,15 @@ function NotificationStatus() {
       await showTestNotification()
       setMessage('Test notification sent ✓')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The test notification could not be sent.')
+      const currentPermission = getNotificationDiagnostics().permission
+      setDiagnostics(getNotificationDiagnostics())
+      setMessage(
+        currentPermission === 'denied'
+          ? 'Notifications are blocked. Allow LUNA in your browser or device settings, then try again.'
+          : error instanceof Error
+            ? error.message
+            : 'The test notification could not be sent right now.',
+      )
     }
   }
 
@@ -126,6 +144,7 @@ function AuthScreen() {
   const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [name, setName] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -133,6 +152,10 @@ function AuthScreen() {
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!supabase) return
+    if (mode === 'register' && password !== confirmPassword) {
+      setMessage('Passwords do not match. Please check them and try again.')
+      return
+    }
     setBusy(true)
     setMessage('')
 
@@ -157,6 +180,22 @@ function AuthScreen() {
 
   return (
     <main className="auth-page">
+      <header className="auth-nav">
+        <div className="brand">
+          <span className="brand-mark">
+            <Leaf size={17} />
+          </span>
+          <span>LUNA Wellness</span>
+        </div>
+        <nav className="auth-nav-links" aria-label="Public navigation">
+          <button className={mode === 'login' ? 'secondary-button auth-nav-active' : 'ghost-button'} type="button" onClick={() => setMode('login')}>
+            Login
+          </button>
+          <button className={mode === 'register' ? 'primary-button' : 'secondary-button'} type="button" onClick={() => setMode('register')}>
+            Register
+          </button>
+        </nav>
+      </header>
       <div className="auth-panel">
         <div className="brand auth-brand">
           <span className="brand-mark">
@@ -188,8 +227,15 @@ function AuthScreen() {
             </label>
           )}
 
+          {mode === 'register' && (
+            <label>
+              Confirm password
+              <input required minLength={8} type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+            </label>
+          )}
+
           <div className="auth-actions">
-            <button className="primary-button auth-submit" type="submit" disabled={busy}>
+            <button className="primary-button auth-submit" type="submit" disabled={busy} aria-busy={busy}>
               {busy ? 'Please wait...' : mode === 'reset' ? 'Send reset link' : mode === 'register' ? 'Create account' : 'Log in'}
             </button>
 
@@ -1044,8 +1090,9 @@ function App() {
               <strong>{session.user.email || 'Luna user'}</strong>
               <small>Private profile</small>
             </div>
-            <button className="icon-button" aria-label="Sign out" onClick={() => void client.auth.signOut()}>
-              <CircleUserRound size={19} />
+            <button className="logout-button" onClick={() => void client.auth.signOut()}>
+              <LogOut size={15} />
+              <span>Log out</span>
             </button>
           </div>
         </div>
