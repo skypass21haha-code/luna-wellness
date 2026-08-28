@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   Activity,
@@ -6,6 +6,8 @@ import {
   BookHeart,
   CalendarDays,
   ChevronRight,
+  Eye,
+  EyeOff,
   Heart,
   Home,
   Leaf,
@@ -24,7 +26,8 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { supabase } from './lib/supabase'
-import { getNotificationDiagnostics, requestNotificationPermission, showTestNotification } from './lib/notifications'
+import { getNotificationDiagnostics, refreshNotificationStatus, requestNotificationPermission, showTestNotification } from './lib/notifications'
+import { createMedicationScheduler, type MedicationReminder } from './lib/medicationScheduler'
 
 type Session = NonNullable<Awaited<ReturnType<NonNullable<typeof supabase>['auth']['getSession']>>['data']['session']>
 type Page = 'Today' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'Settings'
@@ -57,13 +60,39 @@ const privacyItems = [
 function NotificationStatus() {
   const [diagnostics, setDiagnostics] = useState(getNotificationDiagnostics)
   const [message, setMessage] = useState('')
+  const [refreshing, setRefreshing] = useState(true)
 
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return
-    navigator.serviceWorker.ready
-      .then(() => setDiagnostics({ ...getNotificationDiagnostics(), serviceWorker: 'registered' }))
-      .catch(() => setDiagnostics({ ...getNotificationDiagnostics(), serviceWorker: 'failed' }))
+    let mounted = true
+    const refresh = () => {
+      setRefreshing(true)
+      void refreshNotificationStatus().then((next) => {
+        if (mounted) setDiagnostics(next)
+      }).finally(() => {
+        if (mounted) setRefreshing(false)
+      })
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+
+    refresh()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      mounted = false
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
   }, [])
+
+  async function refreshStatus() {
+    setRefreshing(true)
+    setMessage('')
+    setDiagnostics(await refreshNotificationStatus())
+    setRefreshing(false)
+  }
 
   async function enable() {
     try {
@@ -88,6 +117,7 @@ function NotificationStatus() {
             : 'LUNA could not enable notifications right now.',
       )
     }
+    setDiagnostics(await refreshNotificationStatus())
   }
 
   async function test() {
@@ -105,15 +135,28 @@ function NotificationStatus() {
             : 'The test notification could not be sent right now.',
       )
     }
+    setDiagnostics(await refreshNotificationStatus())
   }
 
   const status = !diagnostics.supported
     ? 'Not supported'
-    : diagnostics.permission === 'granted'
-      ? 'Enabled ✓'
+    : !diagnostics.secureContext
+      ? 'Secure connection required'
+      : diagnostics.permission === 'granted'
+        ? 'Enabled'
+        : diagnostics.permission === 'denied'
+          ? 'Blocked'
+          : 'Not enabled'
+
+  const detail = !diagnostics.supported
+    ? 'Your current browser does not support the Notification API.'
+    : !diagnostics.secureContext
+      ? 'Notifications require HTTPS or localhost.'
       : diagnostics.permission === 'denied'
-        ? 'Blocked'
-        : 'Permission required'
+        ? 'Notifications are blocked for this site. Allow them in your browser site settings, then return here.'
+        : diagnostics.permission === 'granted'
+          ? 'LUNA can send browser notifications for reminders. Browser notifications are not guaranteed native alarms.'
+          : 'Allow LUNA to send browser notifications for reminders.'
 
   return (
     <section className="notification-panel">
@@ -121,22 +164,96 @@ function NotificationStatus() {
         <p className="label">DEVICE NOTIFICATIONS</p>
         <strong>{status}</strong>
         <small>
-          Support: {diagnostics.supported ? 'Supported' : 'Unavailable'} · Secure context:{' '}
-          {diagnostics.secureContext ? 'Yes' : 'No'} · Service worker: {diagnostics.serviceWorker}. LUNA can send notifications when supported and permitted, but web notifications are not guaranteed native alarms.
+          Support: {diagnostics.supported ? 'Supported' : 'Unavailable'} · Secure context: {diagnostics.secureContext ? 'Yes' : 'No'} · Service worker: {diagnostics.serviceWorker === 'registered' ? 'Available' : 'Unavailable'}. {detail}
         </small>
       </div>
       <div className="notification-actions">
-        {diagnostics.permission !== 'granted' && (
+        {diagnostics.supported && diagnostics.secureContext && diagnostics.permission === 'default' && (
           <button className="primary-button" onClick={enable}>
             Enable Notifications
           </button>
         )}
-        <button className="text-button" onClick={test}>
-          Send test
+        {diagnostics.permission === 'granted' && (
+          <button className="primary-button" onClick={test}>
+            Send Test
+          </button>
+        )}
+        <button className="secondary-button" onClick={refreshStatus} disabled={refreshing}>
+          {refreshing ? 'Refreshing...' : 'Refresh Status'}
         </button>
       </div>
       {message && <p className="notification-message">{message}</p>}
     </section>
+  )
+}
+
+function useMedicationScheduler(session: Session | null) {
+  const [reminder, setReminder] = useState<MedicationReminder | null>(null)
+  const schedulerRef = useRef<ReturnType<typeof createMedicationScheduler> | null>(null)
+
+  useEffect(() => {
+    if (!supabase || !session) return
+
+    const scheduler = createMedicationScheduler(supabase, {
+      userId: session.user.id,
+      onDue: setReminder,
+    })
+    schedulerRef.current = scheduler
+    const refresh = () => void scheduler.refresh().catch((error) => console.error('[LUNA Medication Scheduler] Refresh failed:', error))
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+
+    void scheduler.start().catch((error) => console.error('[LUNA Medication Scheduler] Start failed:', error))
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      scheduler.stop()
+      schedulerRef.current = null
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      setReminder(null)
+    }
+  }, [session])
+
+  return { reminder, dismiss: () => setReminder(null), scheduleTest: () => schedulerRef.current?.scheduleTest() }
+}
+
+function MedicationAlarm({ reminder, onDismiss, onTaken }: { reminder: MedicationReminder; onDismiss: () => void; onTaken: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function markTaken() {
+    setBusy(true)
+    setError('')
+    try {
+      await onTaken()
+      onDismiss()
+    } catch {
+      setError('LUNA could not save that dose. Please try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="medication-alarm-backdrop" role="presentation">
+      <section className="medication-alarm" role="dialog" aria-modal="true" aria-labelledby="medication-alarm-title">
+        <div className="alarm-icon"><Pill size={22} /></div>
+        <p className="eyebrow">LUNA REMINDER</p>
+        <h2 id="medication-alarm-title">It&apos;s time for your medication.</h2>
+        <strong>{reminder.medicationName}</strong>
+        <p className="alarm-time">Scheduled for {reminder.scheduledLabel}</p>
+        <p className="alarm-note">Your browser notification may also appear when notifications are supported and permitted.</p>
+        {error && <p className="auth-message">{error}</p>}
+        <div className="alarm-actions">
+          <button className="primary-button" onClick={() => void markTaken()} disabled={busy}>
+            {busy ? 'Saving...' : 'Mark as taken'}
+          </button>
+          <button className="secondary-button" onClick={onDismiss} disabled={busy}>Dismiss</button>
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -148,6 +265,7 @@ function AuthScreen() {
   const [name, setName] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -178,93 +296,94 @@ function AuthScreen() {
     )
   }
 
+  const isRegister = mode === 'register'
+  const isReset = mode === 'reset'
+
   return (
     <main className="auth-page">
       <header className="auth-nav">
-        <div className="brand">
-          <span className="brand-mark">
-            <Leaf size={17} />
-          </span>
+        <button className="brand brand-button" type="button" onClick={() => setMode('login')} aria-label="Go to LUNA login">
+          <span className="brand-mark"><Leaf size={17} /></span>
           <span>LUNA Wellness</span>
-        </div>
-        <nav className="auth-nav-links" aria-label="Public navigation">
-          <button className={mode === 'login' ? 'secondary-button auth-nav-active' : 'ghost-button'} type="button" onClick={() => setMode('login')}>
-            Login
+        </button>
+        <nav className="auth-nav-links" aria-label="Authentication navigation">
+          <button className={!isRegister && !isReset ? 'secondary-button auth-nav-active' : 'secondary-button'} type="button" onClick={() => setMode('login')}>
+            Log in
           </button>
-          <button className={mode === 'register' ? 'primary-button' : 'secondary-button'} type="button" onClick={() => setMode('register')}>
-            Register
+          <button className={isRegister ? 'primary-button' : 'secondary-button'} type="button" onClick={() => setMode('register')}>
+            Create account
           </button>
         </nav>
       </header>
-      <div className="auth-panel">
-        <div className="brand auth-brand">
-          <span className="brand-mark">
-            <Leaf size={17} />
-          </span>
-          <span>LUNA</span>
-        </div>
-        <p className="eyebrow">A PRIVATE SPACE FOR YOU</p>
-        <h1>{mode === 'reset' ? 'Reset your password' : mode === 'register' ? 'Welcome to LUNA' : 'Welcome back'}</h1>
-        <p className="auth-copy">Understand your body. Remember your care. Be gentle with yourself.</p>
 
-        <form onSubmit={submit}>
-          {mode === 'register' && (
-            <label>
-              Name
-              <input required value={name} onChange={(event) => setName(event.target.value)} />
-            </label>
-          )}
+      <div className="auth-layout">
+        <section className="auth-introduction" aria-labelledby="auth-intro-title">
+          <div className="auth-mark-large"><Moon size={28} /></div>
+          <p className="eyebrow">YOUR PRIVATE WELLNESS SPACE</p>
+          <h2 id="auth-intro-title">Care that meets you where you are.</h2>
+          <p>Track your care, understand your patterns, and build gentle routines that work for you.</p>
+          <div className="auth-orbit" aria-hidden="true"><span /><span /><span /></div>
+        </section>
 
-          <label>
-            Email
-            <input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
-          </label>
-
-          {mode !== 'reset' && (
-            <label>
-              Password
-              <input required minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
-            </label>
-          )}
-
-          {mode === 'register' && (
-            <label>
-              Confirm password
-              <input required minLength={8} type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
-            </label>
-          )}
-
-          <div className="auth-actions">
-            <button className="primary-button auth-submit" type="submit" disabled={busy} aria-busy={busy}>
-              {busy ? 'Please wait...' : mode === 'reset' ? 'Send reset link' : mode === 'register' ? 'Create account' : 'Log in'}
-            </button>
-
-            {mode !== 'reset' && (
-              <button
-                className="secondary-button auth-secondary"
-                type="button"
-                onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-              >
-                {mode === 'login' ? 'Create account' : 'Log in'}
-              </button>
-            )}
+        <section className="auth-panel" aria-labelledby="auth-title">
+          <div className="auth-card-heading">
+            <p className="eyebrow">{isReset ? 'ACCOUNT ACCESS' : isRegister ? 'BEGIN GENTLY' : 'WELCOME BACK'}</p>
+            <h1 id="auth-title">{isReset ? 'Reset your password' : isRegister ? 'Create your LUNA space' : 'Welcome back'}</h1>
+            <p className="auth-copy">
+              {isReset ? 'Enter your email and we will help you get back into your account.' : isRegister ? 'Start a private wellness journey designed around you.' : 'Sign in to continue your private wellness journey.'}
+            </p>
           </div>
-        </form>
 
-        {message && <p className="auth-message">{message}</p>}
+          <form onSubmit={submit}>
+            {isRegister && (
+              <label>
+                Full name
+                <input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} />
+              </label>
+            )}
 
-        <div className="auth-links">
-          {mode === 'login' && (
-            <button type="button" className="ghost-button" onClick={() => setMode('reset')}>
-              Forgot password?
+            <label>
+              Email address
+              <input required autoComplete="email" placeholder="you@example.com" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+            </label>
+
+            {!isReset && (
+              <label>
+                Password
+                <span className="password-field">
+                  <input required minLength={8} autoComplete={isRegister ? 'new-password' : 'current-password'} type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} />
+                  <button className="password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </span>
+              </label>
+            )}
+
+            {isRegister && (
+              <label>
+                Confirm password
+                <input required minLength={8} autoComplete="new-password" type={showPassword ? 'text' : 'password'} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+              </label>
+            )}
+
+            {!isRegister && !isReset && (
+              <button className="forgot-link" type="button" onClick={() => setMode('reset')}>Forgot password?</button>
+            )}
+
+            <button className="primary-button auth-submit" type="submit" disabled={busy} aria-busy={busy}>
+              {busy ? (isReset ? 'Sending...' : isRegister ? 'Creating account...' : 'Signing in...') : isReset ? 'Send reset link' : isRegister ? 'Create account' : 'Log in'}
             </button>
-          )}
-          {mode === 'reset' && (
-            <button type="button" className="ghost-button" onClick={() => setMode('login')}>
-              Back to sign in
+          </form>
+
+          {message && <p className="auth-message">{message}</p>}
+
+          <div className="auth-switch">
+            <span>{isRegister ? 'Already have an account?' : 'Don’t have an account?'}</span>
+            <button className="secondary-button" type="button" onClick={() => setMode(isRegister || isReset ? 'login' : 'register')}>
+              {isRegister || isReset ? 'Log in' : 'Create account'}
             </button>
-          )}
-        </div>
+          </div>
+        </section>
       </div>
     </main>
   )
@@ -483,7 +602,7 @@ function Symptoms({ session, goHome }: { session: Session; goHome: () => void })
   )
 }
 
-function Medication({ session, goHome }: { session: Session; goHome: () => void }) {
+function Medication({ session, goHome, onTestReminder }: { session: Session; goHome: () => void; onTestReminder: () => void }) {
   type Med = { id: string; name: string; strength: string | null; instructions: string | null; active: boolean }
   const { rows, setRows, loading, error } = useRows<Med>('medications', session)
   const [form, setForm] = useState({ name: '', strength: '', instructions: '', purpose: '', start_date: today(), end_date: '', reminder_time: '20:00' })
@@ -549,6 +668,10 @@ function Medication({ session, goHome }: { session: Session; goHome: () => void 
               {busy ? 'Saving...' : 'Save medication'}
             </button>
           </form>
+          <button className="secondary-button test-reminder-button" type="button" onClick={onTestReminder}>
+            Test reminder in 10 seconds
+          </button>
+          <small className="helper-text">Uses the live reminder pipeline without saving a test medication.</small>
         </section>
 
         <section className="module-card">
@@ -1000,6 +1123,7 @@ function App() {
   const [page, setPage] = useState<Page>('Today')
   const [menuOpen, setMenuOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const { reminder, dismiss, scheduleTest } = useMedicationScheduler(session)
 
   useEffect(() => {
     if (!supabase) {
@@ -1058,6 +1182,17 @@ function App() {
   const goHome = () => go('Today')
 
   const client = supabase
+
+  const markReminderTaken = async () => {
+    if (!reminder || reminder.medicationId === 'test-medication') return
+    const result = await client.from('medication_logs').insert({
+      user_id: session.user.id,
+      medication_id: reminder.medicationId,
+      status: 'taken',
+      logged_at: new Date().toISOString(),
+    })
+    if (result.error) throw result.error
+  }
 
 
   
@@ -1130,11 +1265,12 @@ function App() {
         {page === 'Today' && <Today session={session} go={go} />}
         {page === 'Cycle' && <Cycle session={session} goHome={goHome} />}
         {page === 'Symptoms' && <Symptoms session={session} goHome={goHome} />}
-        {page === 'Medication' && <Medication session={session} goHome={goHome} />}
+        {page === 'Medication' && <Medication session={session} goHome={goHome} onTestReminder={() => { scheduleTest() }} />}
         {page === 'Journal' && <Journal session={session} goHome={goHome} />}
         {page === 'Insights' && <Insights session={session} goHome={goHome} />}
         {page === 'Settings' && <Settings session={session} onSignOut={() => void client.auth.signOut()} goHome={goHome} />}
       </main>
+      {reminder && <MedicationAlarm reminder={reminder} onDismiss={dismiss} onTaken={markReminderTaken} />}
     </div>
   )
 }

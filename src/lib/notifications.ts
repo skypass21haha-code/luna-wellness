@@ -6,63 +6,109 @@ export type NotificationDiagnostics = {
   reason?: string
 }
 
-function supportError() {
-  if (!('Notification' in window)) return 'Notifications are not supported by this browser. You can still use LUNA\'s in-app reminders.'
-  if (!window.isSecureContext) return 'Notifications require a secure connection. Open the deployed HTTPS version of LUNA.'
+let registrationPromise: Promise<ServiceWorkerRegistration> | null = null
+let registrationError: string | undefined
+
+function capabilityError() {
+  if (!('Notification' in window)) return 'Your browser does not support web notifications.'
+  if (!window.isSecureContext) return 'Notifications require HTTPS or localhost.'
   return undefined
 }
 
 export function getNotificationDiagnostics(): NotificationDiagnostics {
   const supported = 'Notification' in window
+  const secureContext = window.isSecureContext
+  const serviceWorkerSupported = 'navigator' in window && 'serviceWorker' in window.navigator
+
   return {
     supported,
-    secureContext: window.isSecureContext,
+    secureContext,
     permission: supported ? Notification.permission : 'unsupported',
-    serviceWorker: 'serviceWorker' in navigator ? 'unavailable' : 'unavailable',
-    reason: supportError(),
+    serviceWorker: !serviceWorkerSupported ? 'unavailable' : registrationError ? 'failed' : registrationPromise ? 'registered' : 'unavailable',
+    reason: capabilityError(),
   }
+}
+
+export function registerNotificationService(): Promise<ServiceWorkerRegistration> | null {
+  if (registrationPromise) return registrationPromise
+  if (capabilityError()) return null
+  if (!('navigator' in window) || !('serviceWorker' in window.navigator)) {
+    registrationError = 'The browser does not provide service-worker support.'
+    return null
+  }
+
+  registrationPromise = window.navigator.serviceWorker.register('/sw.js')
+    .then((registration) => {
+      registrationError = undefined
+      console.info('LUNA service worker registered:', registration.scope)
+      return registration
+    })
+    .catch((error: unknown) => {
+      registrationPromise = null
+      registrationError = error instanceof Error ? error.message : 'Unknown service-worker registration error.'
+      console.error('LUNA service worker registration failed:', error)
+      throw new Error('The browser supports notifications, but the service worker could not be registered.')
+    })
+
+  return registrationPromise
+}
+
+export async function refreshNotificationStatus(): Promise<NotificationDiagnostics> {
+  const registration = registerNotificationService()
+  if (registration) {
+    try {
+      await registration
+    } catch {
+      // Registration failure is retained in the diagnostic state.
+    }
+  }
+  return getNotificationDiagnostics()
 }
 
 export async function getNotificationRegistration(): Promise<ServiceWorkerRegistration> {
-  const problem = supportError()
-  if (problem) throw new Error(problem)
-  if (!('serviceWorker' in navigator)) throw new Error('The service worker is unavailable in this browser.')
-  try {
-    return await navigator.serviceWorker.ready
-  } catch {
-    throw new Error('LUNA could not connect to its notification service. Please reload and try again.')
-  }
+  const registration = registerNotificationService()
+  if (!registration) throw new Error(capabilityError() || registrationError || 'The notification service is unavailable.')
+  return registration
 }
 
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
-  const problem = supportError()
+  const problem = capabilityError()
   if (problem) throw new Error(problem)
   if (Notification.permission !== 'default') return Notification.permission
+
   try {
     return await Notification.requestPermission()
-  } catch {
+  } catch (error) {
+    console.error('LUNA notification permission request failed:', error)
     throw new Error('The browser could not open its notification permission prompt.')
   }
 }
 
+export async function sendNotification(title: string, body: string, tag: string): Promise<void> {
+  const problem = capabilityError()
+  if (problem) throw new Error(problem)
+  if (Notification.permission !== 'granted') {
+    throw new Error(Notification.permission === 'denied' ? 'Notifications are blocked by your browser.' : 'Notification permission is still required.')
+  }
+
+  try {
+    const registration = await getNotificationRegistration()
+    await registration.showNotification(title, { body, tag, icon: '/icon.svg', badge: '/icon.svg', data: { url: window.location.href } })
+  } catch (error) {
+    console.error('LUNA service-worker notification failed:', error)
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body, tag })
+      return
+    }
+    throw error instanceof Error ? error : new Error('The notification service is unavailable.')
+  }
+}
+
 export async function showTestNotification(): Promise<void> {
-  const permission = await requestNotificationPermission()
-  if (permission !== 'granted') throw new Error(permission === 'denied' ? 'Notifications are blocked. Allow notifications for LUNA in your browser or device settings, then try again.' : 'Notification permission is still required.')
-  const registration = await getNotificationRegistration()
-  await registration.showNotification('LUNA Notifications Enabled', {
-    body: 'Your LUNA reminders are ready.',
-    tag: 'luna-test-notification',
-    data: { url: `${window.location.origin}/?notification=test` },
-  })
+  await sendNotification('LUNA', 'Test notification successful. LUNA notifications are working.', 'luna-test-notification')
 }
 
 export async function showMedicationNotification(): Promise<void> {
-  const permission = getNotificationDiagnostics().permission
-  if (permission !== 'granted') return
-  const registration = await getNotificationRegistration()
-  await registration.showNotification('LUNA Reminder', {
-    body: 'Medication reminder',
-    tag: 'luna-medication-reminder',
-    data: { url: `${window.location.origin}/?reminder=1` },
-  })
+  if (getNotificationDiagnostics().permission !== 'granted') return
+  await sendNotification('LUNA Reminder', 'Medication reminder', 'luna-medication-reminder')
 }
