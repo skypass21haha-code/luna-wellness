@@ -227,6 +227,8 @@ body { background: #fbf8f6; }
 .alarm-actions button { width: 100%; }
 .test-reminder-button { width: 100%; margin-top: 18px; }
 .helper-text { display: block; margin-top: 9px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.medication-schedule-summary { display: grid; gap: 3px; margin-top: 9px; }
+.medication-schedule-summary small { margin-top: 0; color: var(--rose); font-weight: 700; }
 .save-feedback { margin: 14px 0 0; padding: 11px 13px; border-radius: 10px; font-size: 12px; line-height: 1.5; }
 .save-feedback.success { color: #356248; background: #edf7ef; border: 1px solid #cfe7d4; }
 .save-feedback.error { color: #8f3f4a; background: #fff0ef; border: 1px solid #f1d0cc; }
@@ -234,6 +236,26 @@ body { background: #fbf8f6; }
 .app.dark .medication-alarm-backdrop { background: rgba(12,9,12,.62); }
 .app.dark .save-feedback.success { color: #c5e9cc; background: #273d2f; border-color: #456b50; }
 .app.dark .save-feedback.error { color: #ffc1c1; background: #4b2c32; border-color: #77434b; }
+.affirmation-card { position: relative; display: flex; min-height: 245px; flex-direction: column; gap: 18px; padding: 24px 22px; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(145deg, #fffaf7 0%, #f8ecec 100%); box-shadow: var(--shadow); }
+.affirmation-card::after { position: absolute; right: -35px; bottom: -55px; width: 150px; height: 150px; border: 1px solid rgba(180,94,104,.16); border-radius: 50%; content: ''; }
+.affirmation-card-top { position: relative; z-index: 1; display: flex; align-items: center; gap: 11px; }
+.affirmation-icon { display: grid; place-items: center; flex: 0 0 auto; width: 35px; height: 35px; color: var(--rose); background: rgba(255,255,255,.75); border: 1px solid rgba(180,94,104,.12); border-radius: 11px; }
+.affirmation-card-top .label { margin-bottom: 3px; }
+.affirmation-card-top small { color: var(--muted); font-size: 10px; }
+.affirmation-copy-button { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; margin-left: auto; padding: 7px 9px; color: var(--rose); background: rgba(255,255,255,.7); border: 1px solid rgba(180,94,104,.14); border-radius: 9px; font-size: 10px; font-weight: 700; }
+.affirmation-message { position: relative; z-index: 1; min-height: 94px; color: var(--ink); font: 25px/1.35 'DM Serif Display', Georgia, serif; }
+.affirmation-message i { display: inline-block; width: 1px; height: 1.05em; margin-left: 4px; vertical-align: -.12em; background: var(--rose); animation: caret-fade 1s ease-in-out infinite; }
+.affirmation-accessible { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.affirmation-skip, .affirmation-footer { position: relative; z-index: 1; margin: auto 0 0; color: var(--rose); font-size: 11px; font-weight: 700; }
+.affirmation-skip { align-self: flex-start; padding: 0; background: transparent; border: 0; }
+.affirmation-skip span { margin-left: 5px; }
+.affirmation-footer { color: var(--muted); font-weight: 500; }
+@keyframes caret-fade { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+.app.dark .affirmation-card { background: linear-gradient(145deg, #3b3036 0%, #33292f 100%); }
+.app.dark .affirmation-icon, .app.dark .affirmation-copy-button { color: var(--rose-strong); background: rgba(83,54,61,.75); border-color: #73505a; }
+.app.dark .affirmation-card::after { border-color: rgba(234,160,165,.18); }
+@media (max-width: 800px) { .affirmation-card { min-height: 220px; } }
+@media (max-width: 470px) { .affirmation-card { padding: 20px 17px; }.affirmation-message { font-size: 22px; }.affirmation-copy-button span { display: none; }.affirmation-copy-button { padding: 8px; } }
 @media (max-width: 520px) {
 	.medication-alarm-backdrop { align-items: end; padding: 12px; }
 	.medication-alarm { padding: 24px 20px; border-radius: 20px; }

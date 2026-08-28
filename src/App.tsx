@@ -29,21 +29,14 @@ import { supabase } from './lib/supabase'
 import { getNotificationDiagnostics, refreshNotificationStatus, requestNotificationPermission, showTestNotification } from './lib/notifications'
 import { createMedicationScheduler, type MedicationReminder } from './lib/medicationScheduler'
 import { consumeAuthUrlError, friendlyAuthError, getAuthRedirectUrl } from './lib/auth'
+import { DailyAffirmation } from './components/DailyAffirmation'
+import { getAffirmationDateKey } from './lib/affirmationService'
 
 type Session = NonNullable<Awaited<ReturnType<NonNullable<typeof supabase>['auth']['getSession']>>['data']['session']>
 type Page = 'Today' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'Settings'
 
 const today = () => new Date().toISOString().slice(0, 10)
 const messageForError = () => 'LUNA is temporarily offline. Please try again when your connection is restored.'
-
-const affirmations = [
-  'You are allowed to rest without earning it.',
-  'Your body is not a project to fix in one day.',
-  'Tender routines count as strength.',
-  'Your care can be gentle and consistent.',
-]
-
-
 
 const goals = [
   'Complete 5 daily check-ins this week.',
@@ -217,7 +210,7 @@ function useMedicationScheduler(session: Session | null) {
     }
   }, [session])
 
-  return { reminder, dismiss: () => setReminder(null), scheduleTest: () => schedulerRef.current?.scheduleTest() }
+  return { reminder, dismiss: () => setReminder(null), scheduleTest: (delayMs = 10000, kind: MedicationReminder['kind'] = 'due') => schedulerRef.current?.scheduleTest(delayMs, kind) }
 }
 
 function MedicationAlarm({ reminder, onDismiss, onTaken }: { reminder: MedicationReminder; onDismiss: () => void; onTaken: () => Promise<void> }) {
@@ -241,15 +234,15 @@ function MedicationAlarm({ reminder, onDismiss, onTaken }: { reminder: Medicatio
     <div className="medication-alarm-backdrop" role="presentation">
       <section className="medication-alarm" role="dialog" aria-modal="true" aria-labelledby="medication-alarm-title">
         <div className="alarm-icon"><Pill size={22} /></div>
-        <p className="eyebrow">LUNA REMINDER</p>
-        <h2 id="medication-alarm-title">It&apos;s time for your medication.</h2>
+        <p className="eyebrow">{reminder.kind === 'advance' ? 'LUNA ADVANCE REMINDER' : 'LUNA REMINDER'}</p>
+        <h2 id="medication-alarm-title">{reminder.kind === 'advance' ? 'Your medication is due in 10 minutes.' : 'It&apos;s time for your medication.'}</h2>
         <strong>{reminder.medicationName}</strong>
         <p className="alarm-time">Scheduled for {reminder.scheduledLabel}</p>
         <p className="alarm-note">Your browser notification may also appear when notifications are supported and permitted.</p>
         {error && <p className="auth-message">{error}</p>}
         <div className="alarm-actions">
           <button className="primary-button" onClick={() => void markTaken()} disabled={busy}>
-            {busy ? 'Saving...' : 'Mark as taken'}
+            {busy ? 'Saving...' : reminder.kind === 'advance' ? 'Got it' : 'Mark as taken'}
           </button>
           <button className="secondary-button" onClick={onDismiss} disabled={busy}>Dismiss</button>
         </div>
@@ -633,7 +626,7 @@ function Symptoms({ session, goHome }: { session: Session; goHome: () => void })
   )
 }
 
-function Medication({ session, goHome, onTestReminder }: { session: Session; goHome: () => void; onTestReminder: () => void }) {
+function Medication({ session, goHome, onTestReminder }: { session: Session; goHome: () => void; onTestReminder: (kind?: MedicationReminder['kind']) => void }) {
   type Med = { id: string; name: string; strength: string | null; instructions: string | null; active: boolean }
   type Schedule = { id: string; medication_id: string; times: string[]; reminder_enabled: boolean }
   const { rows, setRows, loading, error } = useRows<Med>('medications', session)
@@ -767,8 +760,11 @@ function Medication({ session, goHome, onTestReminder }: { session: Session; goH
           </form>
           {saveMessage && <p className="save-feedback success">{saveMessage}</p>}
           {saveError && <p className="save-feedback error">{saveError}</p>}
-          <button className="secondary-button test-reminder-button" type="button" onClick={onTestReminder}>
-            Test reminder in 10 seconds
+          <button className="secondary-button test-reminder-button" type="button" onClick={() => onTestReminder('due')}>
+            Test due reminder in 10 seconds
+          </button>
+          <button className="secondary-button test-reminder-button" type="button" onClick={() => onTestReminder('advance')}>
+            Test 10-minute reminder in 10 seconds
           </button>
           <small className="helper-text">Uses the live reminder pipeline without saving a test medication.</small>
         </section>
@@ -785,7 +781,10 @@ function Medication({ session, goHome, onTestReminder }: { session: Session; goH
                     <strong>{row.name}</strong>
                     <small>{row.strength || 'Dose not set'} · {row.instructions || 'No instructions added'}</small>
                     {schedules.rows.filter((schedule) => schedule.medication_id === row.id).map((schedule) => (
-                      <small key={schedule.id}>Schedule: {schedule.times.join(', ')} · Reminder: {schedule.reminder_enabled ? 'ON' : 'OFF'}</small>
+                      <div className="medication-schedule-summary" key={schedule.id}>
+                        <small>Next dose: {schedule.times.join(', ')}</small>
+                        <small>Advance notice: 10 minutes before · Reminder: {schedule.reminder_enabled ? 'ON' : 'OFF'}</small>
+                      </div>
                     ))}
                   </div>
                   <button className="icon-button" aria-label="Delete medication" onClick={() => remove(row.id)}>
@@ -1002,6 +1001,15 @@ function Today({ session, go }: { session: Session; go: (page: Page) => void }) 
   const [checkIn, setCheckIn] = useState({ mood: 'Good', energy: 7, stress: 3, sleep: 'Good' })
   const [status, setStatus] = useState('Not saved yet')
   const [loading, setLoading] = useState(true)
+  const [affirmationDate, setAffirmationDate] = useState(getAffirmationDateKey)
+
+  useEffect(() => {
+    const now = new Date()
+    const nextDay = new Date(now)
+    nextDay.setHours(24, 0, 0, 50)
+    const timer = window.setTimeout(() => setAffirmationDate(getAffirmationDateKey()), Math.max(1000, nextDay.getTime() - now.getTime()))
+    return () => window.clearTimeout(timer)
+  }, [affirmationDate])
 
   useEffect(() => {
     if (!supabase) return
@@ -1183,13 +1191,7 @@ function Today({ session, go }: { session: Session; go: (page: Page) => void }) 
       </section>
 
       <section className="feature-stack">
-        <article className="mini-card affirmation-card">
-          <div className="mini-card-icon">
-            <Sparkles size={16} />
-          </div>
-          <p className="label">AFFIRMATION</p>
-          <h3>{affirmations[0]}</h3>
-        </article>
+        <DailyAffirmation key={affirmationDate} userId={session.user.id} />
 
         <article className="mini-card goal-card">
           <div className="mini-card-icon">
@@ -1370,7 +1372,7 @@ function App() {
         {page === 'Today' && <Today session={session} go={go} />}
         {page === 'Cycle' && <Cycle session={session} goHome={goHome} />}
         {page === 'Symptoms' && <Symptoms session={session} goHome={goHome} />}
-        {page === 'Medication' && <Medication session={session} goHome={goHome} onTestReminder={() => { scheduleTest() }} />}
+        {page === 'Medication' && <Medication session={session} goHome={goHome} onTestReminder={(kind = 'due') => { scheduleTest?.(10000, kind) }} />}
         {page === 'Journal' && <Journal session={session} goHome={goHome} />}
         {page === 'Insights' && <Insights session={session} goHome={goHome} />}
         {page === 'Settings' && <Settings session={session} onSignOut={() => void client.auth.signOut()} goHome={goHome} />}

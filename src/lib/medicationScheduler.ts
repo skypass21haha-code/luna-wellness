@@ -20,6 +20,7 @@ type ScheduleRow = {
 
 export type MedicationReminder = {
   key: string
+  kind: 'advance' | 'due'
   medicationId: string
   medicationName: string
   scheduleId: string
@@ -43,6 +44,12 @@ function localDateKey(date: Date) {
   return `${year}-${month}-${day}`
 }
 
+function shiftDate(date: Date, days: number) {
+  const shifted = new Date(date)
+  shifted.setDate(shifted.getDate() + days)
+  return shifted
+}
+
 function parseTime(value: string) {
   const [hours, minutes] = value.slice(0, 5).split(':').map(Number)
   return Number.isFinite(hours) && Number.isFinite(minutes) ? { hours, minutes } : null
@@ -56,24 +63,28 @@ function isActiveOnDate(item: ScheduleItem, date: Date) {
   return item.selected_days.includes(date.getDay())
 }
 
-function occurrenceFor(item: ScheduleItem, date: Date, time: string): MedicationReminder | null {
+function occurrenceFor(item: ScheduleItem, date: Date, time: string, kind: MedicationReminder['kind']): MedicationReminder | null {
   const parsed = parseTime(time)
   if (!parsed || !item.medication.active || !item.reminder_enabled || !isActiveOnDate(item, date)) return null
   const occurrence = new Date(date)
   occurrence.setHours(parsed.hours, parsed.minutes, 0, 0)
-  const key = `${item.medication.id}:${item.id}:${occurrence.getTime()}`
+  const scheduledLabel = occurrence.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const reminderTime = new Date(occurrence)
+  if (kind === 'advance') reminderTime.setMinutes(reminderTime.getMinutes() - 10)
+  const key = `${item.medication.id}:${item.id}:${occurrence.getTime()}:${kind}`
   return {
     key,
+    kind,
     medicationId: item.medication.id,
     medicationName: item.medication.name,
     scheduleId: item.id,
-    scheduledAt: occurrence.toISOString(),
-    scheduledLabel: occurrence.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+    scheduledAt: reminderTime.toISOString(),
+    scheduledLabel,
   }
 }
 
 function getOccurrences(item: ScheduleItem, date: Date) {
-  return item.times.map((time) => occurrenceFor(item, date, time)).filter((item): item is MedicationReminder => item !== null)
+  return item.times.flatMap((time) => [occurrenceFor(item, date, time, 'advance'), occurrenceFor(item, date, time, 'due')]).filter((item): item is MedicationReminder => item !== null)
 }
 
 function readProcessed(userId: string) {
@@ -117,7 +128,10 @@ export function createMedicationScheduler(client: SupabaseClient, options: Sched
     writeProcessed(options.userId, processed)
     options.onDue(reminder)
     try {
-      await sendNotification('LUNA Wellness', `It is time for ${reminder.medicationName}. Scheduled for ${reminder.scheduledLabel}.`, `luna-medication-${reminder.key}`)
+      const body = reminder.kind === 'advance'
+        ? `${reminder.medicationName} is due in 10 minutes. Scheduled for ${reminder.scheduledLabel}.`
+        : `It is time for ${reminder.medicationName}. Scheduled for ${reminder.scheduledLabel}.`
+      await sendNotification('LUNA • Medication Reminder', body, `luna-medication-${reminder.key}`)
       console.info('[LUNA Notifications] Medication notification sent')
     } catch (error) {
       console.warn('[LUNA Notifications] Browser notification unavailable; in-app reminder remains active.', error)
@@ -127,14 +141,14 @@ export function createMedicationScheduler(client: SupabaseClient, options: Sched
   const scheduleNext = () => {
     if (stopped) return
     const now = new Date()
-    const today = getOccurrencesForDate(now)
-    const overdue = today.filter((reminder) => {
+    const occurrences = [-1, 0, 1].flatMap((offset) => getOccurrencesForDate(shiftDate(now, offset)))
+    const overdue = occurrences.filter((reminder) => {
       const difference = now.getTime() - new Date(reminder.scheduledAt).getTime()
       return difference >= 0 && difference <= MAX_MISSED_WINDOW_MS
     })
     overdue.forEach((reminder) => void emit(reminder))
 
-    const upcoming = today.filter((reminder) => new Date(reminder.scheduledAt).getTime() > now.getTime())
+    const upcoming = occurrences.filter((reminder) => new Date(reminder.scheduledAt).getTime() > now.getTime())
     const next = upcoming.sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())[0]
     const delay = next ? Math.max(1000, new Date(next.scheduledAt).getTime() - now.getTime()) : 60 * 60 * 1000
     timer = window.setTimeout(() => {
@@ -153,10 +167,11 @@ export function createMedicationScheduler(client: SupabaseClient, options: Sched
 
   return {
     start,
-    scheduleTest: (delayMs = 10000) => {
+    scheduleTest: (delayMs = 10000, kind: MedicationReminder['kind'] = 'due') => {
       const scheduledAt = new Date(Date.now() + delayMs)
       const reminder: MedicationReminder = {
-        key: `test:${scheduledAt.getTime()}`,
+        key: `test:${scheduledAt.getTime()}:${kind}`,
+        kind,
         medicationId: 'test-medication',
         medicationName: 'Test Medication',
         scheduleId: 'test-schedule',
