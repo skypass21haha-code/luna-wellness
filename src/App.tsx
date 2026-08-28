@@ -28,6 +28,7 @@ import './App.css'
 import { supabase } from './lib/supabase'
 import { getNotificationDiagnostics, refreshNotificationStatus, requestNotificationPermission, showTestNotification } from './lib/notifications'
 import { createMedicationScheduler, type MedicationReminder } from './lib/medicationScheduler'
+import { consumeAuthUrlError, friendlyAuthError, getAuthRedirectUrl } from './lib/auth'
 
 type Session = NonNullable<Awaited<ReturnType<NonNullable<typeof supabase>['auth']['getSession']>>['data']['session']>
 type Page = 'Today' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'Settings'
@@ -257,15 +258,23 @@ function MedicationAlarm({ reminder, onDismiss, onTaken }: { reminder: Medicatio
   )
 }
 
-function AuthScreen() {
+function AuthScreen({ authUrlError }: { authUrlError: ReturnType<typeof consumeAuthUrlError> }) {
   const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [name, setName] = useState('')
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(() => authUrlError ? friendlyAuthError(authUrlError) : '')
   const [busy, setBusy] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const timer = window.setInterval(() => setResendCooldown((value) => Math.max(0, value - 1)), 1000)
+    return () => window.clearInterval(timer)
+  }, [resendCooldown])
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -281,8 +290,8 @@ function AuthScreen() {
       mode === 'login'
         ? await supabase.auth.signInWithPassword({ email, password })
         : mode === 'register'
-          ? await supabase.auth.signUp({ email, password, options: { data: { display_name: name } } })
-          : await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+          ? await supabase.auth.signUp({ email, password, options: { data: { display_name: name }, emailRedirectTo: getAuthRedirectUrl() } })
+          : await supabase.auth.resetPasswordForEmail(email, { redirectTo: getAuthRedirectUrl() })
 
     setBusy(false)
     setMessage(
@@ -294,6 +303,22 @@ function AuthScreen() {
             ? 'Check your email to confirm your account.'
             : '',
     )
+  }
+
+  async function resendConfirmation() {
+    if (!supabase || !email || resending || resendCooldown > 0) return
+    setResending(true)
+    setMessage('')
+    try {
+      const result = await supabase.auth.resend({ type: 'signup', email, options: { emailRedirectTo: getAuthRedirectUrl() } })
+      setResendCooldown(result.error ? 0 : 60)
+      setMessage(result.error ? 'Unable to resend the confirmation email. Please check the address and try again.' : 'Confirmation email sent. Please check your inbox and spam folder.')
+    } catch (error) {
+      console.error('LUNA confirmation email resend failed:', error)
+      setMessage('Unable to resend the confirmation email right now. Please try again.')
+    } finally {
+      setResending(false)
+    }
   }
 
   const isRegister = mode === 'register'
@@ -375,7 +400,13 @@ function AuthScreen() {
             </button>
           </form>
 
-          {message && <p className="auth-message">{message}</p>}
+          {message && <p className={`auth-message ${authUrlError || message.includes('Unable') ? 'error' : 'success'}`}>{message}</p>}
+
+          {(authUrlError || (isRegister && message.includes('confirmation'))) && (
+            <button className="secondary-button resend-button" type="button" onClick={() => void resendConfirmation()} disabled={resending || resendCooldown > 0}>
+              {resending ? 'Sending...' : resendCooldown > 0 ? `Please wait ${resendCooldown}s` : 'Resend confirmation email'}
+            </button>
+          )}
 
           <div className="auth-switch">
             <span>{isRegister ? 'Already have an account?' : 'Don’t have an account?'}</span>
@@ -604,47 +635,111 @@ function Symptoms({ session, goHome }: { session: Session; goHome: () => void })
 
 function Medication({ session, goHome, onTestReminder }: { session: Session; goHome: () => void; onTestReminder: () => void }) {
   type Med = { id: string; name: string; strength: string | null; instructions: string | null; active: boolean }
+  type Schedule = { id: string; medication_id: string; times: string[]; reminder_enabled: boolean }
   const { rows, setRows, loading, error } = useRows<Med>('medications', session)
+  const schedules = useRows<Schedule>('medication_schedules', session)
   const [form, setForm] = useState({ name: '', strength: '', instructions: '', purpose: '', start_date: today(), end_date: '', reminder_time: '20:00' })
   const [busy, setBusy] = useState(false)
+  const [saveMessage, setSaveMessage] = useState('')
+  const [saveError, setSaveError] = useState('')
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (!supabase) return
-    setBusy(true)
-
-    const result = await supabase
-      .from('medications')
-      .insert({ user_id: session.user.id, ...form, end_date: form.end_date || null })
-      .select()
-      .single()
-
-    if (!result.error && result.data) {
-      const medication = result.data as Med
-      const schedule = await supabase
-        .from('medication_schedules')
-        .insert({ user_id: session.user.id, medication_id: medication.id, schedule_type: 'once_daily', times: [form.reminder_time], reminder_enabled: true })
-        .select()
-        .single()
-
-      if (!schedule.error && schedule.data) {
-        await supabase
-          .from('reminders')
-          .insert({
-            user_id: session.user.id,
-            medication_id: medication.id,
-            schedule_id: schedule.data.id,
-            scheduled_at: `${form.start_date}T${form.reminder_time}:00`,
-            status: 'scheduled',
-            reminder_enabled: true,
-          })
-      }
-
-      setRows([medication, ...rows])
-      setForm({ name: '', strength: '', instructions: '', purpose: '', start_date: today(), end_date: '', reminder_time: '20:00' })
+    setSaveMessage('')
+    setSaveError('')
+    if (!supabase) {
+      setSaveError('LUNA is not connected to Supabase. Please check the app configuration.')
+      return
+    }
+    if (!form.name.trim()) {
+      setSaveError('Medication name is required.')
+      return
+    }
+    if (!form.start_date) {
+      setSaveError('Start date is required.')
+      return
+    }
+    if (form.end_date && form.end_date < form.start_date) {
+      setSaveError('End date must be on or after the start date.')
+      return
+    }
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(form.reminder_time)) {
+      setSaveError('Enter a valid reminder time.')
+      return
     }
 
-    setBusy(false)
+    setBusy(true)
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser()
+      if (userError || !userData.user) {
+        throw new Error('Please log in again.')
+      }
+
+      const medicationResult = await supabase
+        .from('medications')
+        .insert({
+          user_id: userData.user.id,
+          name: form.name.trim(),
+          strength: form.strength.trim() || null,
+          purpose: form.purpose.trim() || null,
+          instructions: form.instructions.trim() || null,
+          start_date: form.start_date,
+          end_date: form.end_date || null,
+        })
+        .select('id,name,strength,instructions,active')
+        .single()
+
+      if (medicationResult.error || !medicationResult.data) {
+        console.error('Medication save error:', medicationResult.error)
+        throw new Error(medicationResult.error?.message || 'Supabase rejected the medication record.')
+      }
+
+      const medication = medicationResult.data as Med
+      const scheduleResult = await supabase
+        .from('medication_schedules')
+        .insert({ user_id: userData.user.id, medication_id: medication.id, schedule_type: 'once_daily', times: [form.reminder_time], reminder_enabled: true })
+        .select('id,medication_id,times,reminder_enabled')
+        .single()
+
+      if (scheduleResult.error || !scheduleResult.data) {
+        console.error('Medication schedule save error:', scheduleResult.error)
+        await supabase.from('medications').delete().eq('id', medication.id).eq('user_id', userData.user.id)
+        throw new Error(scheduleResult.error?.message || 'Unable to save medication schedule.')
+      }
+      const reminderResult = await supabase
+        .from('reminders')
+        .insert({
+          user_id: userData.user.id,
+          medication_id: medication.id,
+          schedule_id: scheduleResult.data.id,
+          scheduled_at: `${form.start_date}T${form.reminder_time}:00`,
+          status: 'scheduled',
+          reminder_enabled: true,
+        })
+
+      if (reminderResult.error) {
+        console.error('Medication reminder save error:', reminderResult.error)
+        await supabase.from('medication_schedules').delete().eq('id', scheduleResult.data.id).eq('user_id', userData.user.id)
+        await supabase.from('medications').delete().eq('id', medication.id).eq('user_id', userData.user.id)
+        throw new Error(reminderResult.error.message || 'Unable to save medication reminder.')
+      }
+      schedules.setRows([scheduleResult.data as Schedule, ...schedules.rows])
+
+      const reloadResult = await supabase.from('medications').select('id,name,strength,instructions,active').eq('user_id', userData.user.id).order('created_at', { ascending: false })
+      if (reloadResult.error) {
+        console.error('Medication reload error:', reloadResult.error)
+        throw new Error('Medication saved, but LUNA could not reload the medication list.')
+      }
+      setRows((reloadResult.data as Med[]) || [])
+      setForm({ name: '', strength: '', instructions: '', purpose: '', start_date: today(), end_date: '', reminder_time: '20:00' })
+      setSaveMessage('Medication saved successfully ✓')
+    } catch (saveErrorValue) {
+      console.error('Medication save failed:', saveErrorValue)
+      setSaveError(saveErrorValue instanceof Error ? saveErrorValue.message : 'Unable to save medication.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function remove(id: string) {
@@ -661,13 +756,17 @@ function Medication({ session, goHome, onTestReminder }: { session: Session; goH
           <form className="module-form" onSubmit={save}>
             <Field label="Medication name" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
             <Field label="Strength" value={form.strength} onChange={(v) => setForm({ ...form, strength: v })} />
+            <Field label="Purpose" value={form.purpose} onChange={(v) => setForm({ ...form, purpose: v })} />
             <Field label="Instructions" value={form.instructions} onChange={(v) => setForm({ ...form, instructions: v })} />
             <Field label="Start date" type="date" required value={form.start_date} onChange={(v) => setForm({ ...form, start_date: v })} />
+            <Field label="End date" type="date" value={form.end_date} onChange={(v) => setForm({ ...form, end_date: v })} />
             <Field label="Reminder time" type="time" value={form.reminder_time} onChange={(v) => setForm({ ...form, reminder_time: v })} />
             <button className="primary-button" disabled={busy}>
               {busy ? 'Saving...' : 'Save medication'}
             </button>
           </form>
+          {saveMessage && <p className="save-feedback success">{saveMessage}</p>}
+          {saveError && <p className="save-feedback error">{saveError}</p>}
           <button className="secondary-button test-reminder-button" type="button" onClick={onTestReminder}>
             Test reminder in 10 seconds
           </button>
@@ -676,8 +775,8 @@ function Medication({ session, goHome, onTestReminder }: { session: Session; goH
 
         <section className="module-card">
           <h2>Medication list</h2>
-          {loading || error || rows.length === 0 ? (
-            <StateMessage loading={loading} error={error} empty="No medications added yet." />
+          {loading || error || schedules.loading || schedules.error || rows.length === 0 ? (
+            <StateMessage loading={loading || schedules.loading} error={error || schedules.error} empty="No medications added yet." />
           ) : (
             <div className="record-list">
               {rows.map((row) => (
@@ -685,6 +784,9 @@ function Medication({ session, goHome, onTestReminder }: { session: Session; goH
                   <div>
                     <strong>{row.name}</strong>
                     <small>{row.strength || 'Dose not set'} · {row.instructions || 'No instructions added'}</small>
+                    {schedules.rows.filter((schedule) => schedule.medication_id === row.id).map((schedule) => (
+                      <small key={schedule.id}>Schedule: {schedule.times.join(', ')} · Reminder: {schedule.reminder_enabled ? 'ON' : 'OFF'}</small>
+                    ))}
                   </div>
                   <button className="icon-button" aria-label="Delete medication" onClick={() => remove(row.id)}>
                     <Trash2 size={15} />
@@ -1120,25 +1222,28 @@ function Today({ session, go }: { session: Session; go: (page: Page) => void }) 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [authUrlError] = useState(() => consumeAuthUrlError())
   const [page, setPage] = useState<Page>('Today')
   const [menuOpen, setMenuOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const { reminder, dismiss, scheduleTest } = useMedicationScheduler(session)
+  const authClient = supabase
 
   useEffect(() => {
-    if (!supabase) {
+    if (!authClient) {
       queueMicrotask(() => setAuthLoading(false))
       return
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session as Session | null)
+    authClient.auth.getSession().then(async ({ data }) => {
+      if (authUrlError && data.session) await authClient.auth.signOut()
+      setSession(authUrlError ? null : data.session as Session | null)
       setAuthLoading(false)
     })
 
-    const listener = supabase.auth.onAuthStateChange((_event, next) => setSession(next as Session | null))
+    const listener = authClient.auth.onAuthStateChange((_event, next) => setSession(authUrlError ? null : next as Session | null))
     return () => listener.data.subscription.unsubscribe()
-  }, [])
+  }, [authClient, authUrlError])
 
   const navigation = [
     { label: 'Today' as Page, icon: Home },
@@ -1172,7 +1277,7 @@ function App() {
     )
   }
 
-  if (!session) return <AuthScreen />
+  if (!session) return <AuthScreen authUrlError={authUrlError} />
 
   const go = (next: Page) => {
     setPage(next)

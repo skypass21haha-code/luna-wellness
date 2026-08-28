@@ -45,6 +45,9 @@ nav { display: grid; gap: 7px; }
 .auth-links { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
 .auth-links button { padding: 0; color: #b45e68; background: transparent; border: 0; font-size: 11px; font-weight: 700; }
 .auth-message { margin-top: 16px; color: #b45e68; font-size: 11px; }
+.auth-message.success { color: #356248; background: #edf7ef; border-color: #cfe7d4; }
+.auth-message.error { color: #8f3f4a; background: #fff0ef; border-color: #f1d0cc; }
+.resend-button { width: 100%; margin-top: 12px; }
 .auth-panel .disclaimer { margin-top: 34px; }
 .header-home-lockup { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .header-home-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 96px; min-height: 42px; padding: 10px 14px; color: var(--rose); background: var(--rose-soft); border: 1px solid rgba(180,94,104,.18); border-radius: 12px; font-size: 11px; font-weight: 700; }
@@ -211,6 +214,8 @@ body { background: #fbf8f6; }
 .app.dark .auth-panel label { color: #f1e5e5; }
 .app.dark .auth-panel input { color: #f6eceb; background: #251f25; border-color: var(--line); }
 .app.dark .auth-switch { border-color: var(--line); }
+.app.dark .auth-message.success { color: #c5e9cc; background: #273d2f; border-color: #456b50; }
+.app.dark .auth-message.error { color: #ffc1c1; background: #4b2c32; border-color: #77434b; }
 .medication-alarm-backdrop { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(38,28,34,.42); backdrop-filter: blur(5px); }
 .medication-alarm { width: min(100%, 430px); padding: 30px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 24px 70px rgba(40,25,32,.25); animation: rise .24s ease-out; }
 .alarm-icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 18px; color: var(--rose); background: var(--rose-soft); border-radius: 15px; }
@@ -222,8 +227,13 @@ body { background: #fbf8f6; }
 .alarm-actions button { width: 100%; }
 .test-reminder-button { width: 100%; margin-top: 18px; }
 .helper-text { display: block; margin-top: 9px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.save-feedback { margin: 14px 0 0; padding: 11px 13px; border-radius: 10px; font-size: 12px; line-height: 1.5; }
+.save-feedback.success { color: #356248; background: #edf7ef; border: 1px solid #cfe7d4; }
+.save-feedback.error { color: #8f3f4a; background: #fff0ef; border: 1px solid #f1d0cc; }
 .app.dark .medication-alarm { background: #302a30; border-color: #5a4854; box-shadow: 0 24px 70px rgba(0,0,0,.46); }
 .app.dark .medication-alarm-backdrop { background: rgba(12,9,12,.62); }
+.app.dark .save-feedback.success { color: #c5e9cc; background: #273d2f; border-color: #456b50; }
+.app.dark .save-feedback.error { color: #ffc1c1; background: #4b2c32; border-color: #77434b; }
 @media (max-width: 520px) {
 	.medication-alarm-backdrop { align-items: end; padding: 12px; }
 	.medication-alarm { padding: 24px 20px; border-radius: 20px; }
