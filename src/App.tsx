@@ -14,10 +14,13 @@ import {
   Moon,
   Pill,
   Settings as SettingsIcon,
+  ShieldCheck,
   Sparkles,
   SunMedium,
   Trash2,
   X,
+
+  
 } from 'lucide-react'
 import './App.css'
 import { supabase } from './lib/supabase'
@@ -35,6 +38,8 @@ const affirmations = [
   'Tender routines count as strength.',
   'Your care can be gentle and consistent.',
 ]
+
+
 
 const goals = [
   'Complete 5 daily check-ins this week.',
@@ -183,18 +188,36 @@ function AuthScreen() {
             </label>
           )}
 
-          <button className="primary-button auth-submit" disabled={busy}>
-            {busy ? 'Please wait...' : mode === 'reset' ? 'Send reset link' : mode === 'register' ? 'Create private account' : 'Sign in'}
-          </button>
+          <div className="auth-actions">
+            <button className="primary-button auth-submit" type="submit" disabled={busy}>
+              {busy ? 'Please wait...' : mode === 'reset' ? 'Send reset link' : mode === 'register' ? 'Create account' : 'Log in'}
+            </button>
+
+            {mode !== 'reset' && (
+              <button
+                className="secondary-button auth-secondary"
+                type="button"
+                onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+              >
+                {mode === 'login' ? 'Create account' : 'Log in'}
+              </button>
+            )}
+          </div>
         </form>
 
         {message && <p className="auth-message">{message}</p>}
 
         <div className="auth-links">
-          {mode === 'login' && <button onClick={() => setMode('reset')}>Forgot password?</button>}
-          <button onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
-            {mode === 'login' ? 'Create an account' : 'Back to sign in'}
-          </button>
+          {mode === 'login' && (
+            <button type="button" className="ghost-button" onClick={() => setMode('reset')}>
+              Forgot password?
+            </button>
+          )}
+          {mode === 'reset' && (
+            <button type="button" className="ghost-button" onClick={() => setMode('login')}>
+              Back to sign in
+            </button>
+          )}
         </div>
       </div>
     </main>
@@ -249,7 +272,7 @@ function Field({ label, value, onChange, type = 'text', required = false }: { la
   )
 }
 
-function Cycle({ session }: { session: Session }) {
+function Cycle({ session, goHome }: { session: Session; goHome: () => void }) {
   type Period = { id: string; start_date: string; end_date: string | null; spotting: boolean; flow: string | null; pain: number | null; notes: string | null }
   const { rows, setRows, loading, error } = useRows<Period>('period_logs', session, 'start_date')
   const [form, setForm] = useState({ start_date: today(), end_date: '', flow: 'light', pain: '0', notes: '', spotting: false })
@@ -277,7 +300,7 @@ function Cycle({ session }: { session: Session }) {
   }
 
   return (
-    <Module title="Cycle" eyebrow="YOUR CYCLE">
+    <Module title="Cycle" eyebrow="YOUR CYCLE" onHome={goHome}>
       <div className="module-grid">
         <section className="module-card">
           <h2>Log a period</h2>
@@ -331,7 +354,7 @@ function Cycle({ session }: { session: Session }) {
   )
 }
 
-function Symptoms({ session }: { session: Session }) {
+function Symptoms({ session, goHome }: { session: Session; goHome: () => void }) {
   type Symptom = { id: string; symptom_id?: string; name?: string; logged_on: string; severity: number; notes: string | null }
   const { rows, setRows, loading, error } = useRows<Symptom>('symptom_logs', session, 'logged_on')
   const [name, setName] = useState('Fatigue')
@@ -367,7 +390,7 @@ function Symptoms({ session }: { session: Session }) {
   }
 
   return (
-    <Module title="Symptoms" eyebrow="NOTICE WITH KINDNESS">
+    <Module title="Symptoms" eyebrow="NOTICE WITH KINDNESS" onHome={goHome}>
       <div className="module-grid">
         <section className="module-card">
           <h2>Log a symptom</h2>
@@ -414,7 +437,7 @@ function Symptoms({ session }: { session: Session }) {
   )
 }
 
-function Medication({ session }: { session: Session }) {
+function Medication({ session, goHome }: { session: Session; goHome: () => void }) {
   type Med = { id: string; name: string; strength: string | null; instructions: string | null; active: boolean }
   const { rows, setRows, loading, error } = useRows<Med>('medications', session)
   const [form, setForm] = useState({ name: '', strength: '', instructions: '', purpose: '', start_date: today(), end_date: '', reminder_time: '20:00' })
@@ -466,7 +489,7 @@ function Medication({ session }: { session: Session }) {
   }
 
   return (
-    <Module title="Medication" eyebrow="YOUR CARE PLAN">
+    <Module title="Medication" eyebrow="YOUR CARE PLAN" onHome={goHome}>
       <div className="module-grid">
         <section className="module-card">
           <h2>Add medication</h2>
@@ -507,7 +530,7 @@ function Medication({ session }: { session: Session }) {
   )
 }
 
-function Journal({ session }: { session: Session }) {
+function Journal({ session, goHome }: { session: Session; goHome: () => void }) {
   type Entry = { id: string; title: string; content: string; entry_date: string; mood: string | null; tags: string[] }
   const { rows, setRows, loading, error } = useRows<Entry>('journal_entries', session, 'entry_date')
   const [form, setForm] = useState({ title: '', content: '', mood: '', tags: '' })
@@ -538,7 +561,7 @@ function Journal({ session }: { session: Session }) {
   }
 
   return (
-    <Module title="Journal" eyebrow="A PRIVATE PLACE TO REFLECT">
+    <Module title="Journal" eyebrow="A PRIVATE PLACE TO REFLECT" onHome={goHome}>
       <div className="module-grid">
         <section className="module-card">
           <h2>New entry</h2>
@@ -582,13 +605,13 @@ function Journal({ session }: { session: Session }) {
   )
 }
 
-function Insights({ session }: { session: Session }) {
+function Insights({ session, goHome }: { session: Session; goHome: () => void }) {
   const moods = useRows<{ mood: string; energy: number }>('mood_logs', session, 'logged_on')
   const symptoms = useRows<{ severity: number; symptom_id: string }>('symptom_logs', session, 'logged_on')
   const medications = useRows<{ status: string }>('medication_logs', session, 'logged_at')
 
   return (
-    <Module title="Insights" eyebrow="YOUR TRACKING, REFLECTED">
+    <Module title="Insights" eyebrow="YOUR TRACKING, REFLECTED" onHome={goHome}>
       <section className="insight-grid">
         <Insight title="Mood tracking" value={moods.rows.length ? `${moods.rows.length} logged days` : 'No entries yet'} detail="Keep tracking to notice your own patterns." loading={moods.loading} />
         <Insight title="Symptoms" value={symptoms.rows.length ? `${symptoms.rows.length} logged entries` : 'No entries yet'} detail="Your recent tracking will appear here without diagnosis." loading={symptoms.loading} />
@@ -610,7 +633,7 @@ function Insight({ title, value, detail, loading }: { title: string; value: stri
   )
 }
 
-function Settings({ session, onSignOut }: { session: Session; onSignOut: () => void }) {
+function Settings({ session, onSignOut, goHome }: { session: Session; onSignOut: () => void; goHome: () => void }) {
   const [name, setName] = useState('')
   const [message, setMessage] = useState('')
   const [partnerMode, setPartnerMode] = useState(false)
@@ -636,7 +659,7 @@ function Settings({ session, onSignOut }: { session: Session; onSignOut: () => v
   }
 
   return (
-    <Module title="Settings" eyebrow="YOUR PRIVATE SPACE">
+    <Module title="Settings" eyebrow="YOUR PRIVATE SPACE" onHome={goHome}>
       <div className="settings-layout">
         <section className="module-card settings-card">
           <h2>Profile</h2>
@@ -684,11 +707,20 @@ function Settings({ session, onSignOut }: { session: Session; onSignOut: () => v
   )
 }
 
-function Module({ title, eyebrow, children }: { title: string; eyebrow: string; children: ReactNode }) {
+function Module({ title, eyebrow, children, onHome }: { title: string; eyebrow: string; children: ReactNode; onHome?: () => void }) {
   return (
     <section className="module-page">
-      <p className="eyebrow">{eyebrow}</p>
-      <h1>{title}</h1>
+      <div className="module-header-row">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h1>{title}</h1>
+        </div>
+        {onHome && (
+          <button className="secondary-button module-home-button" onClick={onHome} type="button">
+            ← Back to Dashboard
+          </button>
+        )}
+      </div>
       <NotificationStatus />
       {children}
     </section>
@@ -880,17 +912,36 @@ function Today({ session, go }: { session: Session; go: (page: Page) => void }) 
       </section>
 
       <section className="feature-stack">
-        <article className="mini-card">
+        <article className="mini-card affirmation-card">
+          <div className="mini-card-icon">
+            <Sparkles size={16} />
+          </div>
           <p className="label">AFFIRMATION</p>
           <h3>{affirmations[0]}</h3>
         </article>
-        <article className="mini-card">
+
+        <article className="mini-card goal-card">
+          <div className="mini-card-icon">
+            <Leaf size={16} />
+          </div>
           <p className="label">GENTLE GOAL</p>
           <h3>{goals[1]}</h3>
+          <div className="goal-progress" aria-label="Goal progress">
+            <span style={{ width: '44%' }} />
+          </div>
+          <small>Keep it gentle. Small steps count.</small>
         </article>
-        <article className="mini-card">
+
+        <article className="mini-card support-card">
+          <div className="mini-card-icon gentle-icon">
+            <ShieldCheck size={16} />
+          </div>
           <p className="label">PRIVATE SUPPORT</p>
-          <h3>Partner access stays optional and fully controlled.</h3>
+          <h3>Your wellness space stays yours.</h3>
+          <p>Partner access stays optional and fully controlled.</p>
+          <button className="secondary-button support-button" type="button" onClick={() => go('Settings')}>
+            Manage Access →
+          </button>
         </article>
       </section>
     </section>
@@ -958,9 +1009,15 @@ function App() {
     setMenuOpen(false)
   }
 
+  const goHome = () => go('Today')
+
   const client = supabase
 
+
+  
   return (
+
+    
     <div className={`app ${theme}`}>
       <aside className={menuOpen ? 'sidebar open' : 'sidebar'}>
         <div className="brand">
@@ -1000,10 +1057,17 @@ function App() {
             {menuOpen ? <X size={19} /> : <Menu size={19} />}
           </button>
 
-          <div className="breadcrumb">
-            <span>LUNA</span>
-            <ChevronRight size={14} />
-            <small>{page}</small>
+          <div className="header-home-lockup">
+            <button className="header-home-button" type="button" onClick={goHome}>
+              <Home size={16} />
+              <span>Home</span>
+            </button>
+
+            <div className="breadcrumb">
+              <span>LUNA</span>
+              <ChevronRight size={14} />
+              <small>{page}</small>
+            </div>
           </div>
 
           <div className="top-actions">
@@ -1017,12 +1081,12 @@ function App() {
         </header>
 
         {page === 'Today' && <Today session={session} go={go} />}
-        {page === 'Cycle' && <Cycle session={session} />}
-        {page === 'Symptoms' && <Symptoms session={session} />}
-        {page === 'Medication' && <Medication session={session} />}
-        {page === 'Journal' && <Journal session={session} />}
-        {page === 'Insights' && <Insights session={session} />}
-        {page === 'Settings' && <Settings session={session} onSignOut={() => void client.auth.signOut()} />}
+        {page === 'Cycle' && <Cycle session={session} goHome={goHome} />}
+        {page === 'Symptoms' && <Symptoms session={session} goHome={goHome} />}
+        {page === 'Medication' && <Medication session={session} goHome={goHome} />}
+        {page === 'Journal' && <Journal session={session} goHome={goHome} />}
+        {page === 'Insights' && <Insights session={session} goHome={goHome} />}
+        {page === 'Settings' && <Settings session={session} onSignOut={() => void client.auth.signOut()} goHome={goHome} />}
       </main>
     </div>
   )
