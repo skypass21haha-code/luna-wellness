@@ -15,7 +15,6 @@ import {
   Menu,
   Moon,
   Pill,
-  Search,
   Settings as SettingsIcon,
   ShieldCheck,
   Sparkles,
@@ -33,9 +32,22 @@ import { getAffirmationDateKey } from './lib/affirmationService'
 
 type Session = NonNullable<Awaited<ReturnType<NonNullable<typeof supabase>['auth']['getSession']>>['data']['session']>
 type Page = 'Today' | 'Date Tickets' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'Settings'
-type DateTicketStatus = 'unused' | 'redeemed' | 'scheduled' | 'completed'
+type DateTicketStatus = 'unused' | 'revealed' | 'redeemed' | 'scheduled' | 'completed'
 type DateTicketCategory = 'heritage' | 'art' | 'exploration' | 'play' | 'creative'
-
+type DatePrepPriority = 'essential' | 'recommended' | 'optional'
+type DatePrepProfile = {
+  environment: string[]
+  essentials: string[]
+  recommended: string[]
+  optional: string[]
+}
+type ComfortPreferences = {
+  keepCool: boolean
+  preferShade: boolean
+  preferIndoor: boolean
+  avoidExcessiveWalking: boolean
+  preferLessCrowded: boolean
+}
 type DateTicket = {
   id: number
   title: string
@@ -45,12 +57,15 @@ type DateTicket = {
   suggestedPlaces: string[]
   status: DateTicketStatus
   favorite: boolean
+  prep?: DatePrepProfile
+  prepChecklist?: Record<string, boolean>
   date?: string
   time?: string
   meetingPlace?: string
   note?: string
   completionDate?: string
   redemptionDate?: string
+  revealedAt?: string
   memoryPhoto?: string
   memoryNote?: string
   favoriteMoment?: string
@@ -79,6 +94,110 @@ const dateTicketCategoryMeta: Record<DateTicketCategory, { label: string; icon: 
   exploration: { label: 'Exploration', icon: '🌆' },
   play: { label: 'Play', icon: '🎮' },
   creative: { label: 'Creative', icon: '📸' },
+}
+
+const datePrepItemMeta: Record<string, { label: string; icon: string; priority: DatePrepPriority }> = {
+  phone: { label: 'Phone', icon: '📱', priority: 'essential' },
+  wallet: { label: 'Wallet', icon: '💳', priority: 'essential' },
+  power_bank: { label: 'Power bank', icon: '🔋', priority: 'essential' },
+  charging_cable: { label: 'Charging cable', icon: '🔌', priority: 'recommended' },
+  water: { label: 'Water', icon: '💧', priority: 'essential' },
+  portable_fan: { label: 'Portable fan', icon: '🌬️', priority: 'essential' },
+  umbrella: { label: 'Umbrella', icon: '☂️', priority: 'recommended' },
+  sunscreen: { label: 'Sunscreen', icon: '☀️', priority: 'recommended' },
+  hat: { label: 'Cap or hat', icon: '🧢', priority: 'recommended' },
+  cooling_towel: { label: 'Cooling towel', icon: '🧊', priority: 'recommended' },
+  comfortable_shoes: { label: 'Comfortable shoes', icon: '👟', priority: 'essential' },
+  tissues: { label: 'Tissues', icon: '🧻', priority: 'recommended' },
+  wet_wipes: { label: 'Wet wipes', icon: '🧼', priority: 'recommended' },
+  hand_sanitizer: { label: 'Hand sanitizer', icon: '🧴', priority: 'recommended' },
+  deodorant: { label: 'Deodorant', icon: '🌸', priority: 'recommended' },
+  breath_mints: { label: 'Breath mints', icon: '🍬', priority: 'recommended' },
+  reusable_bag: { label: 'Reusable bag', icon: '👜', priority: 'recommended' },
+  cash: { label: 'Cash', icon: '💵', priority: 'recommended' },
+  camera: { label: 'Camera', icon: '📸', priority: 'optional' },
+  sketchbook: { label: 'Sketchbook', icon: '✏️', priority: 'optional' },
+  pencil: { label: 'Pencil', icon: '✏️', priority: 'optional' },
+  small_towel: { label: 'Small towel', icon: '🧢', priority: 'recommended' },
+  extra_shirt: { label: 'Extra shirt', icon: '👕', priority: 'recommended' },
+  breathable_clothing: { label: 'Breathable clothing', icon: '🌿', priority: 'recommended' },
+  waterproof_phone_pouch: { label: 'Waterproof phone pouch', icon: '📦', priority: 'optional' },
+  shaded_break: { label: 'Shaded break', icon: '🏠', priority: 'recommended' },
+  indoor_alternative: { label: 'Indoor alternative', icon: '🏡', priority: 'recommended' },
+  earlier_start_time: { label: 'Earlier time slot', icon: '⏰', priority: 'recommended' },
+  spirit: { label: 'A little excitement', icon: '♡', priority: 'optional' },
+}
+
+const datePrepProfiles: Record<number, DatePrepProfile> = {
+  1: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'portable_fan', 'comfortable_shoes'], recommended: ['umbrella', 'sunscreen', 'hat', 'tissues', 'power_bank'], optional: ['camera'] },
+  2: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'portable_fan', 'comfortable_shoes'], recommended: ['umbrella', 'sunscreen', 'hat', 'power_bank'], optional: ['camera'] },
+  3: { environment: ['indoor', 'walking', 'art'], essentials: ['water', 'comfortable_shoes', 'phone'], recommended: ['power_bank', 'tissues', 'hand_sanitizer'], optional: ['camera'] },
+  4: { environment: ['food', 'walking', 'city'], essentials: ['water', 'tissues', 'hand_sanitizer'], recommended: ['portable_fan', 'cash', 'power_bank', 'reusable_bag'], optional: ['camera'] },
+  5: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'comfortable_shoes'], recommended: ['umbrella', 'portable_fan', 'power_bank', 'tissues'], optional: ['camera'] },
+  6: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'comfortable_shoes'], recommended: ['umbrella', 'sunscreen', 'hat', 'portable_fan'], optional: ['camera'] },
+  7: { environment: ['outdoor', 'creative', 'heritage'], essentials: ['phone', 'water', 'power_bank'], recommended: ['camera', 'umbrella', 'comfortable_shoes'], optional: ['sketchbook'] },
+  8: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'comfortable_shoes'], recommended: ['umbrella', 'portable_fan', 'tissues', 'power_bank'], optional: ['camera'] },
+  9: { environment: ['outdoor', 'exploration', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank', 'tissues'], optional: ['camera'] },
+  10: { environment: ['outdoor', 'creative', 'city'], essentials: ['phone', 'water', 'power_bank'], recommended: ['portable_fan', 'umbrella', 'comfortable_shoes'], optional: ['camera'] },
+  11: { environment: ['outdoor', 'exploration', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
+  12: { environment: ['outdoor', 'exploration', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
+  13: { environment: ['outdoor', 'exploration', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'tissues'], optional: ['camera'] },
+  14: { environment: ['outdoor', 'city', 'exploration'], essentials: ['water', 'power_bank', 'wallet'], recommended: ['comfortable_shoes', 'portable_fan', 'umbrella'], optional: ['camera'] },
+  15: { environment: ['outdoor', 'walking', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'power_bank', 'tissues'], optional: ['camera'] },
+  16: { environment: ['outdoor', 'walking', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
+  17: { environment: ['food', 'walking', 'city'], essentials: ['water', 'tissues', 'hand_sanitizer'], recommended: ['portable_fan', 'cash', 'reusable_bag', 'power_bank'], optional: ['camera'] },
+  18: { environment: ['outdoor', 'coffee', 'exploration'], essentials: ['water', 'portable_fan'], recommended: ['umbrella', 'cash', 'power_bank', 'sunscreen'], optional: ['camera'] },
+  19: { environment: ['outdoor', 'food', 'market'], essentials: ['water', 'wallet', 'cash'], recommended: ['portable_fan', 'tissues', 'reusable_bag', 'power_bank'], optional: ['camera'] },
+  20: { environment: ['indoor', 'walking', 'art'], essentials: ['water', 'comfortable_shoes'], recommended: ['phone', 'power_bank', 'tissues'], optional: ['sketchbook'] },
+  21: { environment: ['indoor', 'art', 'walking'], essentials: ['water', 'comfortable_shoes'], recommended: ['phone', 'power_bank', 'tissues'], optional: ['camera'] },
+  22: { environment: ['indoor', 'art', 'walking'], essentials: ['water', 'comfortable_shoes'], recommended: ['phone', 'power_bank', 'tissues'], optional: ['camera'] },
+  23: { environment: ['indoor', 'art', 'gallery'], essentials: ['phone', 'water'], recommended: ['power_bank', 'comfortable_shoes', 'tissues'], optional: ['camera'] },
+  24: { environment: ['indoor', 'art'], essentials: ['water', 'phone'], recommended: ['power_bank', 'comfortable_shoes', 'tissues'], optional: ['camera'] },
+  25: { environment: ['indoor', 'creative', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'comfortable_shoes', 'tissues'], optional: ['sketchbook'] },
+  26: { environment: ['indoor', 'creative', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'camera', 'comfortable_shoes'], optional: ['sketchbook'] },
+  27: { environment: ['indoor', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'camera', 'comfortable_shoes'], optional: ['sketchbook'] },
+  28: { environment: ['indoor', 'art', 'creative'], essentials: ['water', 'phone'], recommended: ['sketchbook', 'pencil', 'power_bank'], optional: ['camera'] },
+  29: { environment: ['indoor', 'art', 'creative'], essentials: ['phone', 'water'], recommended: ['power_bank', 'camera', 'tissues'], optional: ['sketchbook'] },
+  30: { environment: ['indoor', 'art', 'creative'], essentials: ['phone', 'water'], recommended: ['power_bank', 'camera', 'tissues'], optional: ['sketchbook'] },
+  31: { environment: ['outdoor', 'creative', 'photography'], essentials: ['phone', 'water', 'power_bank'], recommended: ['camera', 'comfortable_shoes', 'umbrella'], optional: ['sketchbook'] },
+  32: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
+  33: { environment: ['indoor', 'art'], essentials: ['phone', 'wallet'], recommended: ['power_bank', 'water', 'comfortable_shoes'], optional: ['camera'] },
+  34: { environment: ['indoor', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'comfortable_shoes'], optional: ['camera'] },
+  35: { environment: ['outdoor', 'art', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
+  36: { environment: ['indoor', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'comfortable_shoes', 'tissues'], optional: ['camera'] },
+  37: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
+  38: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
+  39: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
+  40: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
+  41: { environment: ['indoor', 'play'], essentials: ['phone', 'wallet'], recommended: ['water', 'power_bank', 'tissues'], optional: ['camera'] },
+  42: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
+  43: { environment: ['indoor', 'play'], essentials: ['water', 'phone'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['camera'] },
+  44: { environment: ['indoor', 'physical_activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['small_towel', 'extra_shirt', 'power_bank', 'comfortable_clothing'], optional: ['camera'] },
+  45: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
+  46: { environment: ['outdoor', 'walking', 'activity'], essentials: ['water', 'portable_fan', 'comfortable_shoes'], recommended: ['umbrella', 'sunscreen', 'hat', 'power_bank', 'tissues'], optional: ['camera'] },
+  47: { environment: ['indoor', 'play'], essentials: ['water', 'phone'], recommended: ['power_bank', 'tissues', 'wallet'], optional: ['camera'] },
+  48: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
+  49: { environment: ['outdoor', 'physical_activity'], essentials: ['water', 'comfortable_clothing'], recommended: ['small_towel', 'extra_shirt', 'power_bank'], optional: ['camera'] },
+  50: { environment: ['outdoor', 'physical_activity'], essentials: ['water', 'comfortable_clothing'], recommended: ['small_towel', 'extra_shirt', 'power_bank'], optional: ['camera'] },
+}
+
+const defaultComfortPreferences: ComfortPreferences = {
+  keepCool: true,
+  preferShade: true,
+  preferIndoor: false,
+  avoidExcessiveWalking: false,
+  preferLessCrowded: true,
+}
+
+function loadComfortPreferences(): ComfortPreferences {
+  try {
+    const saved = localStorage.getItem('luna-date-comfort-preferences-v1')
+    if (!saved) return defaultComfortPreferences
+    const parsed = JSON.parse(saved) as Partial<ComfortPreferences>
+    return { ...defaultComfortPreferences, ...parsed }
+  } catch {
+    return defaultComfortPreferences
+  }
 }
 
 const dateTicketCatalog: Array<Omit<DateTicket, 'status' | 'favorite'>> = [
@@ -134,10 +253,14 @@ const dateTicketCatalog: Array<Omit<DateTicket, 'status' | 'favorite'>> = [
   { id: 50, title: 'Badminton Together', category: 'play', description: 'A little movement, a few laughs, and a date with a rhythm all your own.', location: 'Badminton Court', suggestedPlaces: ['Community sports hubs', 'Sports venues in Metro Manila', 'Local parks / indoor courts'] },
 ]
 
-const dateTicketFilterOptions: Array<'all' | DateTicketStatus> = ['all', 'unused', 'scheduled', 'completed']
-
 function getInitialDateTickets(): DateTicket[] {
-  return dateTicketCatalog.map((ticket) => ({ ...ticket, status: 'unused', favorite: false }))
+  return dateTicketCatalog.map((ticket) => ({
+    ...ticket,
+    prep: ticket.prep ?? datePrepProfiles[ticket.id] ?? { environment: ['general'], essentials: ['water'], recommended: ['power_bank'], optional: [] },
+    prepChecklist: {},
+    status: 'unused',
+    favorite: false,
+  }))
 }
 
 function loadDateTickets() {
@@ -149,6 +272,8 @@ function loadDateTickets() {
     const byId = new Map(parsed.map((ticket) => [ticket.id, ticket]))
     return dateTicketCatalog.map((ticket) => ({
       ...ticket,
+      prep: ticket.prep ?? byId.get(ticket.id)?.prep ?? datePrepProfiles[ticket.id] ?? { environment: ['general'], essentials: ['water'], recommended: ['power_bank'], optional: [] },
+      prepChecklist: byId.get(ticket.id)?.prepChecklist ?? {},
       status: byId.get(ticket.id)?.status ?? 'unused',
       favorite: byId.get(ticket.id)?.favorite ?? false,
       date: byId.get(ticket.id)?.date,
@@ -164,6 +289,57 @@ function loadDateTickets() {
     }))
   } catch {
     return getInitialDateTickets()
+  }
+}
+
+function getDatePrepList(ticket: DateTicket | null, preferences: ComfortPreferences) {
+  const profile = ticket?.prep ?? datePrepProfiles[ticket?.id ?? 0] ?? { environment: ['general'], essentials: ['water'], recommended: ['power_bank'], optional: [] }
+  const essentialItems = Array.from(new Set(profile.essentials))
+  const recommendedItems = Array.from(new Set(profile.recommended))
+  const optionalItems = Array.from(new Set(profile.optional))
+  const extraRecommended: string[] = []
+
+  if (preferences.keepCool && profile.environment.some((value) => ['outdoor', 'walking', 'city', 'heritage', 'exploration', 'market', 'activity', 'physical_activity'].includes(value))) {
+    extraRecommended.push('portable_fan', 'water', 'umbrella', 'sunscreen', 'hat', 'cooling_towel')
+  }
+  if (preferences.preferShade && profile.environment.some((value) => ['outdoor', 'walking', 'city', 'heritage', 'exploration', 'market', 'activity'].includes(value))) {
+    extraRecommended.push('umbrella')
+  }
+  if (preferences.preferIndoor && profile.environment.some((value) => ['outdoor', 'walking', 'city', 'market', 'activity'].includes(value))) {
+    extraRecommended.push('indoor_alternative')
+  }
+  if (preferences.avoidExcessiveWalking && profile.environment.some((value) => ['walking', 'outdoor', 'city', 'exploration'].includes(value))) {
+    essentialItems.push('comfortable_shoes')
+  }
+  if (preferences.preferLessCrowded && ['food', 'market', 'city', 'exploration', 'outdoor'].some((value) => profile.environment.includes(value))) {
+    extraRecommended.push('tissues', 'hand_sanitizer', 'breath_mints', 'deodorant')
+  }
+
+  const uniqueEssential = Array.from(new Set([...essentialItems, ...(preferences.keepCool ? ['water', 'portable_fan'] : []), ...(['water', 'phone', 'wallet', 'power_bank'].filter((item) => item !== 'water' || essentialItems.includes('water')))]))
+  const uniqueRecommended = Array.from(new Set([...recommendedItems, ...extraRecommended]))
+  const uniqueOptional = Array.from(new Set(optionalItems))
+
+  const checklist = Array.from(new Set([
+    'phone',
+    'wallet',
+    'power_bank',
+    'water',
+    ...uniqueEssential,
+    ...uniqueRecommended,
+  ])).slice(0, 10)
+
+  const priorityLabels = ['essential', 'recommended', 'optional'] as const
+  return {
+    essentialItems: uniqueEssential.filter((item) => item in datePrepItemMeta),
+    recommendedItems: uniqueRecommended.filter((item) => item in datePrepItemMeta),
+    optionalItems: uniqueOptional.filter((item) => item in datePrepItemMeta),
+    checklistItems: checklist.filter((item) => item in datePrepItemMeta),
+    comfortNote: preferences.keepCool && profile.environment.some((value) => ['outdoor', 'walking', 'heritage', 'exploration', 'city'].includes(value))
+      ? 'This date may involve outdoor walking. Don\'t forget to keep cool, sip water, and take a little pause when the weather feels a bit much. ♡'
+      : preferences.preferIndoor && profile.environment.some((value) => ['outdoor', 'walking'].includes(value))
+        ? 'LUNA tip: a shaded stop or an indoor break can make the little adventure feel even softer and easier.'
+        : 'For this adventure, LUNA is keeping the plan practical, comfortable, and easy to enjoy.',
+    priorityLabels,
   }
 }
 
@@ -1116,42 +1292,39 @@ function Module({ title, eyebrow, children, onHome }: { title: string; eyebrow: 
 function DateTicketsPage({ goHome }: { goHome: () => void }) {
   const [tickets, setTickets] = useState<DateTicket[]>(() => loadDateTickets())
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
-  const [statusFilter, setStatusFilter] = useState<'all' | DateTicketStatus>('all')
-  const [categoryFilter, setCategoryFilter] = useState<'all' | DateTicketCategory>('all')
-  const [search, setSearch] = useState('')
+  const [revealTicketId, setRevealTicketId] = useState<number | null>(null)
+  const [revealStage, setRevealStage] = useState<'loading' | 'flip' | 'done'>('loading')
+  const [revealPrompt, setRevealPrompt] = useState<{ ticketId: number; step: 1 | 2 | 3 } | null>(null)
   const [redeemTicketId, setRedeemTicketId] = useState<number | null>(null)
-  const [randomTicketId, setRandomTicketId] = useState<number | null>(null)
-  const [surpriseTicketId, setSurpriseTicketId] = useState<number | null>(null)
-  const [surpriseReveal, setSurpriseReveal] = useState(false)
   const [scheduleDraft, setScheduleDraft] = useState({ date: '', time: '', meetingPlace: '', note: '' })
   const [memoryDraft, setMemoryDraft] = useState({ photo: '', memoryNote: '', favoriteMoment: '', rating: 5 })
+  const [comfortPreferences, setComfortPreferences] = useState<ComfortPreferences>(() => loadComfortPreferences())
 
   useEffect(() => {
     localStorage.setItem('luna-date-tickets-v1', JSON.stringify(tickets))
   }, [tickets])
 
+  useEffect(() => {
+    localStorage.setItem('luna-date-comfort-preferences-v1', JSON.stringify(comfortPreferences))
+  }, [comfortPreferences])
+
   const selectedTicket = tickets.find((ticket) => ticket.id === selectedTicketId) ?? null
-  const randomTicket = tickets.find((ticket) => ticket.id === randomTicketId) ?? null
-  const surpriseTicket = tickets.find((ticket) => ticket.id === surpriseTicketId) ?? null
+  const revealTicket = tickets.find((ticket) => ticket.id === revealTicketId) ?? null
+  const activeSurprise = useMemo(
+    () => tickets.find((ticket) => ticket.status === 'revealed' || ticket.status === 'redeemed' || ticket.status === 'scheduled') ?? null,
+    [tickets],
+  )
+  const selectedDatePrep = useMemo(() => getDatePrepList(selectedTicket, comfortPreferences), [selectedTicket, comfortPreferences])
+  const canRevealAnotherTicket = !activeSurprise || activeSurprise.status === 'completed'
 
-  const filteredTickets = useMemo(() => {
-    const query = search.trim().toLowerCase()
-
-    return tickets.filter((ticket) => {
-      const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter
-      const matchesCategory = categoryFilter === 'all' || ticket.category === categoryFilter
-      const haystack = [ticket.title, ticket.description, ticket.location, ticket.category, ...ticket.suggestedPlaces].join(' ').toLowerCase()
-      const matchesSearch = !query || haystack.includes(query)
-      return matchesStatus && matchesCategory && matchesSearch
-    })
-  }, [tickets, statusFilter, categoryFilter, search])
-
-  const stats = useMemo(() => ({
-    unused: tickets.filter((ticket) => ticket.status === 'unused').length,
-    scheduled: tickets.filter((ticket) => ticket.status === 'scheduled').length,
-    completed: tickets.filter((ticket) => ticket.status === 'completed').length,
-    favorites: tickets.filter((ticket) => ticket.favorite).length,
-  }), [tickets])
+  const stats = useMemo(() => {
+    const secret = tickets.filter((ticket) => ticket.status === 'unused').length
+    const revealed = tickets.filter((ticket) => ticket.status === 'revealed').length
+    const scheduled = tickets.filter((ticket) => ticket.status === 'scheduled').length
+    const completed = tickets.filter((ticket) => ticket.status === 'completed').length
+    const total = tickets.length
+    return { total, secret, revealed, scheduled, completed }
+  }, [tickets])
 
   const updateTicket = (id: number, updater: (ticket: DateTicket) => DateTicket) => {
     setTickets((current) => current.map((ticket) => ticket.id === id ? updater(ticket) : ticket))
@@ -1173,6 +1346,64 @@ function DateTicketsPage({ goHome }: { goHome: () => void }) {
       favoriteMoment: ticket.favoriteMoment ?? '',
       rating: ticket.rating ?? 5,
     })
+  }
+
+  const revealOneTicket = (id: number) => {
+    const ticket = tickets.find((entry) => entry.id === id)
+    if (!ticket || ticket.status !== 'unused') return
+
+    setRevealTicketId(id)
+    setRevealStage('loading')
+
+    window.setTimeout(() => setRevealStage('flip'), 600)
+    window.setTimeout(() => {
+      updateTicket(id, (entry) => ({
+        ...entry,
+        status: 'revealed',
+        revealedAt: entry.revealedAt ?? today(),
+      }))
+      setRevealStage('done')
+      setSelectedTicketId(id)
+    }, 1500)
+  }
+
+  const beginRevealFlow = (ticketId: number) => {
+    const ticket = tickets.find((entry) => entry.id === ticketId)
+    if (!ticket || ticket.status !== 'unused') return
+    if (!canRevealAnotherTicket) {
+      if (activeSurprise) setSelectedTicketId(activeSurprise.id)
+      return
+    }
+    setRevealPrompt({ ticketId, step: 1 })
+  }
+
+  const cancelRevealFlow = () => setRevealPrompt(null)
+
+  const continueRevealFlow = () => {
+    if (!revealPrompt) return
+    if (revealPrompt.step === 1) {
+      setRevealPrompt({ ticketId: revealPrompt.ticketId, step: 2 })
+      return
+    }
+    if (revealPrompt.step === 2) {
+      setRevealPrompt({ ticketId: revealPrompt.ticketId, step: 3 })
+      return
+    }
+    if (revealPrompt.step === 3) {
+      setRevealPrompt(null)
+      revealOneTicket(revealPrompt.ticketId)
+    }
+  }
+
+  const pickRandomDate = () => {
+    if (!canRevealAnotherTicket) {
+      if (activeSurprise) setSelectedTicketId(activeSurprise.id)
+      return
+    }
+    const pool = tickets.filter((ticket) => ticket.status === 'unused')
+    if (pool.length === 0) return
+    const next = pool[Math.floor(Math.random() * pool.length)]
+    beginRevealFlow(next.id)
   }
 
   const saveSchedule = () => {
@@ -1198,6 +1429,17 @@ function DateTicketsPage({ goHome }: { goHome: () => void }) {
     }))
   }
 
+  const togglePrepItem = (item: string) => {
+    if (!selectedTicketId) return
+    updateTicket(selectedTicketId, (ticket) => ({
+      ...ticket,
+      prepChecklist: {
+        ...(ticket.prepChecklist ?? {}),
+        [item]: !(ticket.prepChecklist?.[item] ?? false),
+      },
+    }))
+  }
+
   const markCompleted = () => {
     if (!selectedTicketId) return
     updateTicket(selectedTicketId, (ticket) => ({
@@ -1218,181 +1460,278 @@ function DateTicketsPage({ goHome }: { goHome: () => void }) {
     setRedeemTicketId(null)
   }
 
-  const pickRandomDate = () => {
-    const candidates = tickets.filter((ticket) => ticket.status !== 'completed')
-    const pool = candidates.length > 0 ? candidates : tickets
-    if (pool.length === 0) return
-    const next = pool[Math.floor(Math.random() * pool.length)]
-    setRandomTicketId(next.id)
-  }
-
-  const revealSurpriseDate = () => {
-    const candidates = tickets.filter((ticket) => ticket.status === 'unused')
-    const pool = candidates.length > 0 ? candidates : tickets
-    const next = pool[Math.floor(Math.random() * pool.length)]
-    setSurpriseTicketId(next.id)
-    setSurpriseReveal(false)
-  }
+  const upcomingDates = tickets.filter((ticket) => ticket.status === 'scheduled' || ticket.status === 'revealed')
+  const completedDates = tickets.filter((ticket) => ticket.status === 'completed')
 
   return (
     <section className="date-tickets-page">
-      <div className="date-tickets-header">
-        <div>
-          <p className="eyebrow">🎟️ DATE TICKETS</p>
-          <h1>Our date passes</h1>
-          <p className="date-tickets-subtitle">50 little adventures waiting to happen. ♡</p>
-        </div>
-        <div className="date-tickets-actions">
-          <button className="primary-button" type="button" onClick={pickRandomDate}>🎲 Pick our date</button>
-          <button className="secondary-button" type="button" onClick={() => { setSurpriseTicketId(null); setSurpriseReveal(false); revealSurpriseDate() }}>🌙 Surprise me</button>
-        </div>
-      </div>
-
-      <div className="date-stats-bar">
-        <div className="date-stat"><span>🎟️</span><strong>{stats.unused}</strong><small>unused</small></div>
-        <div className="date-stat"><span>📅</span><strong>{stats.scheduled}</strong><small>scheduled</small></div>
-        <div className="date-stat"><span>✨</span><strong>{stats.completed}</strong><small>completed</small></div>
-        <div className="date-stat"><span>♡</span><strong>{stats.favorites}</strong><small>favorites</small></div>
-      </div>
-
-      <div className="date-progress card-surface">
-        <div className="date-progress-copy">
-          <p className="label">OUR DATE COLLECTION</p>
-          <strong>{stats.completed} / {tickets.length} completed</strong>
-        </div>
-        <div className="progress-track" aria-label={`Completed tickets progress: ${stats.completed} of ${tickets.length}`}>
-          <span style={{ width: `${(stats.completed / tickets.length) * 100}%` }} />
-        </div>
-      </div>
-
-      <div className="filter-row card-surface">
-        <label className="search-shell">
-          <Search size={15} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a date..." aria-label="Search date tickets" />
-        </label>
-
-        <div className="status-filters" aria-label="Ticket status filters">
-          {dateTicketFilterOptions.map((option) => (
-            <button key={option} type="button" className={statusFilter === option ? 'filter-chip active' : 'filter-chip'} onClick={() => setStatusFilter(option)}>
-              {option === 'all' ? 'All' : option.charAt(0).toUpperCase() + option.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="category-scroll" aria-label="Category filters">
-        {(['all', 'heritage', 'art', 'exploration', 'play', 'creative'] as const).map((option) => (
-          <button key={option} type="button" className={categoryFilter === option ? 'category-pill active' : 'category-pill'} onClick={() => setCategoryFilter(option)}>
-            {option === 'all' ? 'All' : `${dateTicketCategoryMeta[option].icon} ${dateTicketCategoryMeta[option].label}`}
-          </button>
-        ))}
-      </div>
-
-      {filteredTickets.length === 0 ? (
-        <div className="empty-date-card card-surface">
-          <p className="eyebrow">NO MATCHES</p>
-          <h3>Nothing here yet.</h3>
-          <p>Try another search or pick a date from the full collection.</p>
-          <button className="primary-button" type="button" onClick={() => { setSearch(''); setCategoryFilter('all'); setStatusFilter('all') }}>Reset filters</button>
-        </div>
-      ) : (
-        <div className="date-ticket-grid">
-          {filteredTickets.map((ticket) => (
-            <article key={ticket.id} className={`date-ticket-card ${ticket.status}`}>
-              <div className="ticket-paper">
-                <div className="ticket-topline">
-                  <span className="ticket-brand">LUNA</span>
-                  <button type="button" className={ticket.favorite ? 'favorite-button active' : 'favorite-button'} onClick={() => updateTicket(ticket.id, (entry) => ({ ...entry, favorite: !entry.favorite }))} aria-label={ticket.favorite ? `Remove ${ticket.title} from favorites` : `Add ${ticket.title} to favorites`}>
-                    {ticket.favorite ? '♥' : '♡'}
-                  </button>
-                </div>
-                <div className="ticket-serial">#{String(ticket.id).padStart(3, '0')}</div>
-                <div className="ticket-title-wrap">
-                  <p className="ticket-label">DATE PASS</p>
-                  <h3>{ticket.title}</h3>
-                </div>
-                <div className="ticket-meta-row">
-                  <span className="ticket-icon">{dateTicketCategoryMeta[ticket.category].icon}</span>
-                  <span className="ticket-meta-label">{dateTicketCategoryMeta[ticket.category].label}</span>
-                </div>
-                <p className="ticket-description">“{ticket.description}”</p>
-                <div className="ticket-footer">
-                  <div>
-                    <small>STATUS</small>
-                    <strong>{ticket.status.toUpperCase()}</strong>
-                  </div>
-                  <button className="ticket-open" type="button" onClick={() => openTicket(ticket.id)}>Open ticket</button>
-                </div>
-              </div>
-            </article>
-          ))}
+      {activeSurprise && activeSurprise.status !== 'completed' && (
+        <div className="current-adventure card-surface">
+          <p className="eyebrow">🌙 YOUR CURRENT ADVENTURE</p>
+          <h2>One little surprise is enough for now.</h2>
+          <p>You have a secret waiting for its day. Enjoy this one first. ♡</p>
+          <button className="primary-button" type="button" onClick={() => setSelectedTicketId(activeSurprise.id)}>🎟️ View my date</button>
         </div>
       )}
 
-      <div className="date-vault card-surface">
-        <div className="date-vault-header">
-          <div>
-            <p className="eyebrow">🔐 DATE VAULT</p>
-            <h2>Saved memories</h2>
-          </div>
+      <div className="date-tickets-hero card-surface">
+        <div className="date-hero-mark">🌙</div>
+        <p className="eyebrow">YOUR LITTLE ADVENTURES</p>
+        <h1>50 surprises are waiting for you.</h1>
+        <p className="date-hero-copy">You don't get to choose the date. LUNA does.</p>
+        <div className="date-hero-actions">
+          {canRevealAnotherTicket ? (
+            <button className="primary-button" type="button" onClick={() => {
+              const pool = tickets.filter((ticket) => ticket.status === 'unused')
+              const next = pool[Math.floor(Math.random() * pool.length)]
+              if (next) beginRevealFlow(next.id)
+            }}>✨ Reveal my date</button>
+          ) : (
+            <button className="primary-button" type="button" onClick={() => setSelectedTicketId(activeSurprise?.id ?? null)} disabled={!activeSurprise}>🎟️ View current surprise</button>
+          )}
+          <button className="secondary-button" type="button" onClick={pickRandomDate} disabled={!canRevealAnotherTicket}>🎲 Let LUNA choose</button>
         </div>
-        {tickets.filter((ticket) => ticket.status === 'completed').length === 0 ? (
-          <p className="module-empty">No completed dates yet. The vault is waiting for its first memory.</p>
-        ) : (
-          <div className="date-vault-list">
-            {tickets.filter((ticket) => ticket.status === 'completed').map((ticket) => (
-              <button key={ticket.id} type="button" className="vault-item" onClick={() => openTicket(ticket.id)}>
-                <span>🎟️ #{String(ticket.id).padStart(3, '0')}</span>
-                <strong>{ticket.title}</strong>
-                <small>{ticket.completionDate ?? 'Completed'}</small>
+      </div>
+
+      <div className="date-secret-stats">
+        <div className="stat-glass"><span>🎟️</span><strong>{stats.total}</strong><small>Total surprises</small></div>
+        <div className="stat-glass"><span>🔒</span><strong>{stats.secret}</strong><small>Still secret</small></div>
+        <div className="stat-glass"><span>✨</span><strong>{stats.revealed}</strong><small>Revealed</small></div>
+        <div className="stat-glass"><span>🌸</span><strong>{stats.completed}</strong><small>Lived</small></div>
+      </div>
+
+      <div className="comfort-panel card-surface">
+        <div className="mystery-heading compact">
+          <p className="eyebrow">🌬️ COMFORT PREFERENCES</p>
+          <h2>LUNA keeps the little details gentle.</h2>
+        </div>
+        <div className="comfort-grid">
+          {[
+            { key: 'keepCool', label: 'Keep me cool', icon: '🌬️' },
+            { key: 'preferShade', label: 'Prefer shade when possible', icon: '☂️' },
+            { key: 'preferIndoor', label: 'Prefer indoor alternatives', icon: '🏠' },
+            { key: 'avoidExcessiveWalking', label: 'Avoid excessive walking', icon: '🚶' },
+            { key: 'preferLessCrowded', label: 'Prefer less crowded places', icon: '👥' },
+          ].map(({ key, label, icon }) => (
+            <label key={key} className="comfort-toggle">
+              <input
+                type="checkbox"
+                checked={comfortPreferences[key as keyof ComfortPreferences]}
+                onChange={(event) => setComfortPreferences((current) => ({ ...current, [key]: event.target.checked }))}
+              />
+              <span>{icon}</span>
+              <strong>{label}</strong>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="make-it-mystery card-surface">
+        <div className="mystery-heading">
+          <p className="eyebrow">SECRET DATE COLLECTION</p>
+          <h2>One little surprise at a time.</h2>
+        </div>
+        <div className="mystery-grid">
+          {tickets.map((ticket) => {
+            const isSecret = ticket.status === 'unused'
+            const accent = ['🌙', '🌸', '✦', '♡', '🎟️', '🔐', '✨'][ticket.id % 7]
+
+            return (
+              <button
+                key={ticket.id}
+                type="button"
+                className={isSecret ? 'mystery-ticket is-secret' : 'mystery-ticket is-open'}
+                onClick={() => {
+                  if (isSecret) {
+                    beginRevealFlow(ticket.id)
+                    return
+                  }
+                  openTicket(ticket.id)
+                }}
+              >
+                <div className="mystery-ticket-inner">
+                  <div className="mystery-header">
+                    <span>LUNA</span>
+                    {ticket.favorite ? <span className="tiny-heart">♥</span> : <span className="tiny-dot">•</span>}
+                  </div>
+                  <div className="mystery-serial">#{String(ticket.id).padStart(3, '0')}</div>
+                  <div className="mystery-symbol">{accent}</div>
+                  {isSecret ? (
+                    <>
+                      <strong>SECRET DATE PASS</strong>
+                      <small>Your adventure is hidden</small>
+                      <span className="mystery-lock">🔒</span>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{ticket.title}</strong>
+                      <small>{ticket.status === 'scheduled' ? 'Scheduled' : ticket.status === 'completed' ? 'Completed' : 'Revealed'}</small>
+                    </>
+                  )}
+                </div>
               </button>
-            ))}
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="date-collector-row">
+        <div className="date-upcoming card-surface">
+          <div className="mystery-heading compact">
+            <p className="eyebrow">📅 UPCOMING</p>
+            <h2>Plans in motion</h2>
           </div>
-        )}
+          {upcomingDates.length === 0 ? (
+            <p className="module-empty">No adventures are scheduled yet. LUNA is still keeping it a surprise.</p>
+          ) : (
+            <div className="vault-stack">
+              {upcomingDates.map((ticket) => (
+                <button key={ticket.id} type="button" className="vault-item" onClick={() => openTicket(ticket.id)}>
+                  <span>🎟️ #{String(ticket.id).padStart(3, '0')}</span>
+                  <strong>{ticket.title}</strong>
+                  <small>{ticket.status === 'scheduled' ? `${ticket.date ?? 'Soon'} · ${ticket.time ?? 'Flexible'}` : 'Revealed and ready'}</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="date-vault card-surface">
+          <div className="mystery-heading compact">
+            <p className="eyebrow">🔐 DATE VAULT</p>
+            <h2>The adventures we’ve already lived</h2>
+          </div>
+          {completedDates.length === 0 ? (
+            <p className="module-empty">The vault is waiting for its first memory.</p>
+          ) : (
+            <div className="vault-stack">
+              {completedDates.map((ticket) => (
+                <button key={ticket.id} type="button" className="vault-item" onClick={() => openTicket(ticket.id)}>
+                  <span>🎟️ #{String(ticket.id).padStart(3, '0')}</span>
+                  <strong>{ticket.title}</strong>
+                  <small>{ticket.completionDate ?? 'Completed'}</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="date-generator card-surface">
-        <div className="date-vault-header">
-          <div>
-            <p className="eyebrow">✨ BUILD A DATE</p>
-            <h2>Pick the mood</h2>
-          </div>
+        <div className="mystery-heading compact">
+          <p className="eyebrow">✨ LET LUNA BUILD THE SURPRISE</p>
+          <h2>Choose how much control you want.</h2>
         </div>
         <div className="generator-grid">
           <label>
-            Mood
-            <select defaultValue="cozy">
+            <span>Energy</span>
+            <select defaultValue="surprise">
+              <option value="surprise">🌙 Completely random</option>
               <option value="cozy">🌸 Cozy</option>
-              <option value="creative">🎨 Creative</option>
               <option value="playful">🎮 Playful</option>
               <option value="adventurous">🌆 Adventurous</option>
-              <option value="quiet">📚 Quiet</option>
-              <option value="food">🍰 Food-focused</option>
+              <option value="creative">🎨 Creative</option>
             </select>
           </label>
           <label>
-            Time
-            <select defaultValue="afternoon">
-              <option value="morning">☀️ Morning</option>
-              <option value="afternoon">🌤 Afternoon</option>
-              <option value="evening">🌙 Evening</option>
-            </select>
-          </label>
-          <label>
-            Energy
-            <select defaultValue="medium">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
+            <span>Time</span>
+            <select defaultValue="anytime">
+              <option value="anytime">Any time</option>
+              <option value="morning">Morning</option>
+              <option value="afternoon">Afternoon</option>
+              <option value="evening">Evening</option>
             </select>
           </label>
         </div>
-        <button className="primary-button" type="button" onClick={() => {
-          const pool = tickets.filter((ticket) => ticket.status === 'unused')
-          const next = pool[Math.floor(Math.random() * pool.length)] ?? tickets[0]
-          if (next) openTicket(next.id)
-        }}>Recommend a date</button>
+        <button className="primary-button" type="button" onClick={pickRandomDate}>🎟️ Blind date</button>
       </div>
+
+      {revealPrompt && (
+        <div className="ticket-modal-backdrop" role="presentation" onClick={cancelRevealFlow}>
+          <div className="reveal-confirmation" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="reveal-confirmation-body">
+              <div className="reveal-crest">🌙</div>
+              {revealPrompt.step === 1 && (
+                <>
+                  <p className="eyebrow">WAIT...</p>
+                  <h3>There are still many little adventures waiting for you.</h3>
+                  <p>Once you open this one, the surprise is gone. Do you really want to know what LUNA picked?</p>
+                  <div className="modal-actions stacked">
+                    <button className="primary-button" type="button" onClick={continueRevealFlow}>YES, I'M SURE</button>
+                    <button className="secondary-button" type="button" onClick={cancelRevealFlow}>LET ME WAIT ♡</button>
+                    <button className="text-button subtle" type="button" onClick={cancelRevealFlow}>💌 LET SOMEONE ELSE PICK</button>
+                  </div>
+                </>
+              )}
+              {revealPrompt.step === 2 && (
+                <>
+                  <p className="eyebrow">♡ ONE MORE THING...</p>
+                  <h3>You don't have to open it right now.</h3>
+                  <p>You could let this little secret linger a little longer. Are you really sure?</p>
+                  <div className="modal-actions stacked">
+                    <button className="primary-button" type="button" onClick={continueRevealFlow}>I'M REALLY SURE</button>
+                    <button className="secondary-button" type="button" onClick={cancelRevealFlow}>I'LL WAIT ♡</button>
+                  </div>
+                </>
+              )}
+              {revealPrompt.step === 3 && (
+                <>
+                  <p className="eyebrow">🎟️ LAST CHANCE</p>
+                  <h3>This little surprise can only be a surprise once.</h3>
+                  <p>Take your time. Do you still want to reveal it?</p>
+                  <div className="modal-actions stacked">
+                    <button className="primary-button" type="button" onClick={continueRevealFlow}>OPEN MY SURPRISE ✨</button>
+                    <button className="secondary-button" type="button" onClick={cancelRevealFlow}>NOT YET</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {revealTicket && (
+        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setRevealTicketId(null)}>
+          <div className="reveal-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className={`reveal-stage ${revealStage}`}>
+              {revealStage === 'loading' && (
+                <>
+                  <p className="eyebrow">🌙 LUNA IS FINDING YOUR ADVENTURE...</p>
+                  <div className="pulse-orbit">✦</div>
+                  <p className="reveal-loading">Searching the secret collection...</p>
+                </>
+              )}
+              {revealStage === 'flip' && (
+                <>
+                  <p className="eyebrow">🎟️</p>
+                  <div className="mystery-reveal-card">
+                    <span className="reveal-luna">LUNA</span>
+                    <strong>#{String(revealTicket.id).padStart(3, '0')}</strong>
+                    <div className="reveal-spark">✦</div>
+                    <small>SECRET DATE PASS</small>
+                  </div>
+                  <p className="reveal-loading">Your surprise is almost here...</p>
+                </>
+              )}
+              {revealStage === 'done' && (
+                <>
+                  <p className="eyebrow">✨ YOUR DATE HAS BEEN CHOSEN</p>
+                  <div className="reveal-card-hit">
+                    <span className="reveal-badge">#{String(revealTicket.id).padStart(3, '0')}</span>
+                    <h3>{revealTicket.title}</h3>
+                    <div className="reveal-category">{dateTicketCategoryMeta[revealTicket.category].icon} {dateTicketCategoryMeta[revealTicket.category].label}</div>
+                    <p>{revealTicket.description}</p>
+                  </div>
+                  <div className="modal-actions">
+                    <button className="primary-button" type="button" onClick={() => { setRevealTicketId(null); setSelectedTicketId(revealTicket.id); }}>Schedule date</button>
+                    <button className="secondary-button" type="button" onClick={() => { setRevealTicketId(null); setSelectedTicketId(revealTicket.id); }}>Keep for later</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {selectedTicket && (
         <div className="ticket-modal-backdrop" role="presentation" onClick={() => setSelectedTicketId(null)}>
@@ -1423,6 +1762,99 @@ function DateTicketsPage({ goHome }: { goHome: () => void }) {
               </ul>
             </div>
 
+            {selectedTicket.status !== 'unused' && selectedDatePrep && (
+              <div className="date-prep-panel">
+                <div className="date-prep-header">
+                  <p className="eyebrow">🎒 DATE PREP</p>
+                  <h4>Everything we might want for our little adventure. ♡</h4>
+                </div>
+                <p className="date-prep-note">{selectedDatePrep.comfortNote}</p>
+
+                <div className="prep-groups">
+                  {selectedDatePrep.essentialItems.length > 0 && (
+                    <div className="prep-group">
+                      <span className="prep-group-label">ESSENTIAL</span>
+                      <div className="prep-items">
+                        {selectedDatePrep.essentialItems.map((item) => {
+                          const meta = datePrepItemMeta[item]
+                          return (
+                            <div key={item} className="prep-item essential">
+                              <span>{meta.icon}</span>
+                              <strong>{meta.label}</strong>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedDatePrep.recommendedItems.length > 0 && (
+                    <div className="prep-group">
+                      <span className="prep-group-label">RECOMMENDED</span>
+                      <div className="prep-items">
+                        {selectedDatePrep.recommendedItems.map((item) => {
+                          const meta = datePrepItemMeta[item]
+                          return (
+                            <div key={item} className="prep-item recommended">
+                              <span>{meta.icon}</span>
+                              <strong>{meta.label}</strong>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedDatePrep.optionalItems.length > 0 && (
+                    <div className="prep-group">
+                      <span className="prep-group-label">OPTIONAL</span>
+                      <div className="prep-items">
+                        {selectedDatePrep.optionalItems.map((item) => {
+                          const meta = datePrepItemMeta[item]
+                          return (
+                            <div key={item} className="prep-item optional">
+                              <span>{meta.icon}</span>
+                              <strong>{meta.label}</strong>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="prep-checklist">
+                  <div className="prep-checklist-header">♡ BEFORE WE GO</div>
+                  <div className="prep-checklist-grid">
+                    {selectedDatePrep.checklistItems.map((item) => {
+                      const checked = !!selectedTicket.prepChecklist?.[item]
+                      const meta = datePrepItemMeta[item]
+                      return (
+                        <button
+                          key={item}
+                          type="button"
+                          className={checked ? 'prep-check-item checked' : 'prep-check-item'}
+                          onClick={() => togglePrepItem(item)}
+                          aria-pressed={checked}
+                        >
+                          <span className="checkmark">{checked ? '☑' : '☐'}</span>
+                          <span>{meta.icon}</span>
+                          <strong>{meta.label}</strong>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {selectedDatePrep.checklistItems.length > 0 && selectedDatePrep.checklistItems.every((item) => !!selectedTicket.prepChecklist?.[item]) && (
+                  <div className="ready-panel" aria-live="polite">
+                    <div className="ready-badge">✨ WE'RE READY</div>
+                    <p>Everything's packed. Now we just need the adventure. ♡</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {selectedTicket.status !== 'completed' && (
               <div className="schedule-panel">
                 <h4>Date details</h4>
@@ -1441,10 +1873,13 @@ function DateTicketsPage({ goHome }: { goHome: () => void }) {
                   </label>
                   <label className="full-width">
                     Note
-                    <textarea value={scheduleDraft.note} onChange={(event) => setScheduleDraft((current) => ({ ...current, note: event.target.value }))} placeholder="Can\'t wait for this one ♡" />
+                    <textarea value={scheduleDraft.note} onChange={(event) => setScheduleDraft((current) => ({ ...current, note: event.target.value }))} placeholder="Can't wait for this one ♡" />
                   </label>
                 </div>
                 <div className="modal-actions">
+                  {selectedTicket.status === 'revealed' && (
+                    <button className="primary-button" type="button" onClick={saveSchedule}>Schedule this date</button>
+                  )}
                   {selectedTicket.status === 'unused' && (
                     <button className="primary-button" type="button" onClick={() => setRedeemTicketId(selectedTicket.id)}>Redeem ticket</button>
                   )}
@@ -1506,44 +1941,6 @@ function DateTicketsPage({ goHome }: { goHome: () => void }) {
               <button className="primary-button" type="button" onClick={redeemTicket}>Yes, redeem it</button>
               <button className="secondary-button" type="button" onClick={() => setRedeemTicketId(null)}>Not yet</button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {randomTicket && (
-        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setRandomTicketId(null)}>
-          <div className="redeem-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <p className="eyebrow">✨ LUNA CHOSE...</p>
-            <h3>{randomTicket.title}</h3>
-            <p>Maybe this one is waiting for you two. ♡</p>
-            <div className="modal-actions">
-              <button className="primary-button" type="button" onClick={() => { setSelectedTicketId(randomTicket.id); setRandomTicketId(null) }}>Open ticket</button>
-              <button className="secondary-button" type="button" onClick={() => { setRandomTicketId(null); pickRandomDate() }}>Try again</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {surpriseTicket && (
-        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setSurpriseTicketId(null)}>
-          <div className="redeem-modal surprise-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <p className="eyebrow">🌙 LUNA HAS A DATE FOR YOU</p>
-            {!surpriseReveal ? (
-              <>
-                <div className="surprise-box">🎁</div>
-                <p>Don\'t peek yet.</p>
-                <button className="primary-button" type="button" onClick={() => setSurpriseReveal(true)}>Reveal</button>
-              </>
-            ) : (
-              <>
-                <h3>{surpriseTicket.title}</h3>
-                <p>{surpriseTicket.description}</p>
-                <div className="modal-actions">
-                  <button className="primary-button" type="button" onClick={() => { setSelectedTicketId(surpriseTicket.id); setSurpriseTicketId(null) }}>Open ticket</button>
-                  <button className="secondary-button" type="button" onClick={() => { setSurpriseTicketId(null); revealSurpriseDate() }}>Try another</button>
-                </div>
-              </>
-            )}
           </div>
         </div>
       )}
