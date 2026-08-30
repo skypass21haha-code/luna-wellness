@@ -11,6 +11,7 @@ import {
   Heart,
   Home,
   Leaf,
+  Lock,
   LogOut,
   Menu,
   Moon,
@@ -21,6 +22,7 @@ import {
   SunMedium,
   Trash2,
   X,
+  Zap,
 } from 'lucide-react'
 import './App.css'
 import { supabase } from './lib/supabase'
@@ -31,7 +33,10 @@ import { DailyAffirmation } from './components/DailyAffirmation'
 import { getAffirmationDateKey } from './lib/affirmationService'
 
 type Session = NonNullable<Awaited<ReturnType<NonNullable<typeof supabase>['auth']['getSession']>>['data']['session']>
-type Page = 'Today' | 'Date Tickets' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'Settings'
+type Page = 'Today' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'OurSpace' | 'Messages' | 'DateTickets' | 'DateVault' | 'PersonalSettings' | 'CoupleSettings'
+type PartnerConnectionStatus = 'not_connected' | 'request_sent' | 'request_received' | 'connected' | 'declined' | 'disconnected'
+type PartnerMessage = { id: string; senderId: string; content: string; createdAt: string; readAt?: string }
+type PartnerState = { status: PartnerConnectionStatus; myCode: string; partnerUserId?: string; partnerName?: string; partnerCode?: string; connectedAt?: string; unreadCount: number; messages: PartnerMessage[] }
 type DateTicketStatus = 'unused' | 'revealed' | 'redeemed' | 'scheduled' | 'completed'
 type DateTicketCategory = 'heritage' | 'art' | 'exploration' | 'play' | 'creative'
 type DatePrepPriority = 'essential' | 'recommended' | 'optional'
@@ -74,6 +79,60 @@ type DateTicket = {
 
 const today = () => new Date().toISOString().slice(0, 10)
 const messageForError = () => 'LUNA is temporarily offline. Please try again when your connection is restored.'
+
+// Partner connection helpers
+function generatePartnerCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const pieces = Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)])
+  return `LUNA-${pieces.join('')}`
+}
+
+function partnerStateKey(userId: string) {
+  return `luna-partner-state:${userId}`
+}
+
+function connectionThreadKey(userA: string, userB: string) {
+  return [userA, userB].sort().join(':')
+}
+
+function readPartnerState(userId: string): PartnerState {
+  try {
+    const raw = localStorage.getItem(partnerStateKey(userId))
+    if (!raw) {
+      return { status: 'not_connected', myCode: generatePartnerCode(), unreadCount: 0, messages: [] }
+    }
+    const parsed = JSON.parse(raw) as Partial<PartnerState>
+    return {
+      status: parsed.status ?? 'not_connected',
+      myCode: parsed.myCode ?? generatePartnerCode(),
+      partnerUserId: parsed.partnerUserId,
+      partnerName: parsed.partnerName,
+      partnerCode: parsed.partnerCode,
+      connectedAt: parsed.connectedAt,
+      unreadCount: parsed.unreadCount ?? 0,
+      messages: parsed.messages ?? [],
+    }
+  } catch {
+    return { status: 'not_connected', myCode: generatePartnerCode(), unreadCount: 0, messages: [] }
+  }
+}
+
+function writePartnerState(userId: string, state: PartnerState) {
+  localStorage.setItem(partnerStateKey(userId), JSON.stringify(state))
+}
+
+function readThreadMessages(userA: string, userB: string): PartnerMessage[] {
+  try {
+    const raw = localStorage.getItem(`luna-partner-thread:${connectionThreadKey(userA, userB)}`)
+    return raw ? (JSON.parse(raw) as PartnerMessage[]) : []
+  } catch {
+    return []
+  }
+}
+
+function writeThreadMessages(userA: string, userB: string, messages: PartnerMessage[]) {
+  localStorage.setItem(`luna-partner-thread:${connectionThreadKey(userA, userB)}`, JSON.stringify(messages))
+}
 
 const goals = [
   'Complete 5 daily check-ins this week.',
@@ -1195,7 +1254,276 @@ function Insight({ title, value, detail, loading }: { title: string; value: stri
   )
 }
 
-function Settings({ session, onSignOut, goHome }: { session: Session; onSignOut: () => void; goHome: () => void }) {
+function OurSpaceDashboard({ session, goHome, go }: { session: Session; goHome: () => void; go: (page: Page) => void }) {
+  const [partnerState] = useState<PartnerState>(() => {
+    const state = readPartnerState(session.user.id)
+    if (!state.partnerUserId) return state
+    return { ...state, messages: readThreadMessages(session.user.id, state.partnerUserId) }
+  })
+
+  return (
+    <Module title="Our Space" eyebrow="♡ A LITTLE SPACE FOR TWO" onHome={goHome}>
+      <div className="couple-dashboard">
+        {partnerState.status === 'connected' ? (
+          <>
+            <section className="couple-hero card-surface">
+              <div className="couple-header">
+                <h2>{partnerState.partnerName || 'Your partner'}</h2>
+                <span className="couple-status">● Connected</span>
+              </div>
+              <p>Our shared adventures and memories wait here.</p>
+            </section>
+
+            <div className="couple-cards-grid">
+              <section className="couple-card">
+                <div className="card-icon">💌</div>
+                <h3>Our Messages</h3>
+                <p className="card-detail">{partnerState.messages.length} conversations</p>
+                <button className="primary-button" type="button" onClick={() => go('Messages')}>View Messages</button>
+              </section>
+
+              <section className="couple-card">
+                <div className="card-icon">🎟️</div>
+                <h3>Our Next Adventure</h3>
+                <p className="card-detail">One little surprise waiting</p>
+                <button className="primary-button" type="button" onClick={() => go('DateTickets')}>View Date</button>
+              </section>
+
+              <section className="couple-card">
+                <div className="card-icon">🔐</div>
+                <h3>Date Vault</h3>
+                <p className="card-detail">Our shared memories</p>
+                <button className="primary-button" type="button" onClick={() => go('DateVault')}>View Memories</button>
+              </section>
+            </div>
+          </>
+        ) : (
+          <section className="couple-card unconnected-state card-surface">
+            <div className="unconnected-content">
+              <p className="eyebrow">Your little shared space is waiting.</p>
+              <h3>Connect your person to unlock:</h3>
+              <ul className="unconnected-features">
+                <li>💌 Private Messages</li>
+                <li>🎟️ Shared Date Adventures</li>
+                <li>🔐 Date Vault & Memories</li>
+                <li>♡ Couple Settings</li>
+              </ul>
+              <button className="primary-button" type="button" onClick={() => go('CoupleSettings')}>Connect with Partner</button>
+            </div>
+          </section>
+        )}
+      </div>
+    </Module>
+  )
+}
+
+function MessagesPage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [partnerState, setPartnerState] = useState<PartnerState>(() => {
+    const state = readPartnerState(session.user.id)
+    if (!state.partnerUserId) return state
+    return { ...state, messages: readThreadMessages(session.user.id, state.partnerUserId) }
+  })
+  const [messageDraft, setMessageDraft] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
+
+  useEffect(() => {
+    writePartnerState(session.user.id, partnerState)
+    if (partnerState.partnerUserId) {
+      writeThreadMessages(session.user.id, partnerState.partnerUserId, partnerState.messages)
+    }
+  }, [partnerState, session.user.id])
+
+  const sendMessage = () => {
+    const content = messageDraft.trim()
+    if (!content || partnerState.status !== 'connected') {
+      setStatusMessage('Connection needed to send messages.')
+      return
+    }
+
+    const newMessage: PartnerMessage = {
+      id: crypto.randomUUID ? crypto.randomUUID() : `msg-${Date.now()}`,
+      senderId: 'me',
+      content,
+      createdAt: new Date().toISOString(),
+    }
+
+    setPartnerState((current) => ({
+      ...current,
+      unreadCount: 0,
+      messages: [...current.messages, newMessage],
+    }))
+    setMessageDraft('')
+    setStatusMessage('Message sent ♡')
+  }
+
+  return (
+    <Module title="Messages" eyebrow="💌 PRIVATE CONVERSATION" onHome={goHome}>
+      <div className="messages-page">
+        <div className="chat-thread">
+          {partnerState.messages.map((message) => {
+            const isMine = message.senderId === 'me'
+            return (
+              <div key={message.id} className={isMine ? 'chat-bubble mine' : 'chat-bubble'}>
+                <span>{message.content}</span>
+                <small>{new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="chat-composer">
+          <textarea value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} placeholder="Send a quiet note to your partner..." rows={3} />
+          <button className="primary-button" type="button" onClick={sendMessage}>Send</button>
+        </div>
+        {statusMessage && <p className="status-line">{statusMessage}</p>}
+      </div>
+    </Module>
+  )
+}
+
+function DateVaultPage({ goHome }: { goHome: () => void }) {
+  const [tickets] = useState<DateTicket[]>(() => loadDateTickets())
+  const completedDates = tickets.filter((ticket) => ticket.status === 'completed')
+
+  return (
+    <Module title="Date Vault" eyebrow="🔐 OUR SHARED MEMORIES" onHome={goHome}>
+      <div className="date-vault-page">
+        {completedDates.length === 0 ? (
+          <p className="module-empty">The vault is waiting for its first memory. Complete a date and add a photo to start building your shared story.</p>
+        ) : (
+          <div className="vault-stack">
+            {completedDates.map((ticket) => (
+              <div key={ticket.id} className="vault-item">
+                <span>🎟️ #{String(ticket.id).padStart(3, '0')}</span>
+                <div>
+                  <strong>{ticket.title}</strong>
+                  {ticket.rating && <span className="rating">★★★★★</span>}
+                </div>
+                <small>{ticket.completionDate ?? 'Completed'}</small>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Module>
+  )
+}
+
+function CoupleSettings({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [partnerState, setPartnerState] = useState<PartnerState>(() => readPartnerState(session.user.id))
+  const [requestCode, setRequestCode] = useState('')
+  const [statusMessage, setStatusMessage] = useState('Your private connection stays off unless you choose to share a little space.')
+
+  useEffect(() => {
+    writePartnerState(session.user.id, partnerState)
+  }, [partnerState, session.user.id])
+
+  const submitConnectionRequest = () => {
+    const code = requestCode.trim().toUpperCase()
+    if (!code) {
+      setStatusMessage('Add a partner code to send a connection request.')
+      return
+    }
+    if (code === partnerState.myCode) {
+      setStatusMessage('This is your own code. Ask your partner to share theirs instead.')
+      return
+    }
+
+    setPartnerState((current) => ({
+      ...current,
+      status: 'request_sent',
+      partnerCode: code,
+      partnerName: 'Pending partner',
+      partnerUserId: 'partner-local',
+      unreadCount: 0,
+    }))
+    setRequestCode('')
+    setStatusMessage('Your request is waiting for acceptance. LUNA will keep the space private until they respond.')
+  }
+
+  const acceptConnection = () => {
+    setPartnerState((current) => ({
+      ...current,
+      status: 'connected',
+      partnerName: current.partnerName || 'Your partner',
+      connectedAt: new Date().toISOString().slice(0, 10),
+      unreadCount: 0,
+      messages: current.messages.length > 0 ? current.messages : [
+        { id: 'seed-1', senderId: 'partner', content: 'I saved a little surprise for us.', createdAt: new Date().toISOString() },
+      ],
+    }))
+    setStatusMessage('Connection accepted. Your shared space is now ready for quiet, intentional messages.')
+  }
+
+  const declineConnection = () => {
+    setPartnerState((current) => ({
+      ...current,
+      status: 'declined',
+      partnerCode: undefined,
+      partnerName: undefined,
+      partnerUserId: undefined,
+      unreadCount: 0,
+    }))
+    setStatusMessage('The request was declined. You can reconnect whenever you want, without changing the rest of your private LUNA space.')
+  }
+
+  return (
+    <Module title="Couple Settings" eyebrow="♡ PARTNER CONNECTION" onHome={goHome}>
+      <div className="couple-settings-page">
+        <section className="settings-card card-surface">
+          <div className="settings-header">
+            <h2>Connect with your partner</h2>
+            <span className={`status-badge status-${partnerState.status}`}>
+              {partnerState.status === 'connected' ? 'Connected' : partnerState.status === 'request_sent' ? 'Request sent' : partnerState.status === 'request_received' ? 'Request received' : 'Not connected'}
+            </span>
+          </div>
+
+          <div className="code-display">
+            <label>My LUNA code</label>
+            <strong>{partnerState.myCode}</strong>
+            <small>Only share this with someone you trust.</small>
+          </div>
+
+          <div className="connection-input">
+            <label>Enter partner's LUNA code</label>
+            <input value={requestCode} onChange={(event) => setRequestCode(event.target.value)} placeholder="LUNA-ABCD12" />
+            <button className="primary-button" type="button" onClick={submitConnectionRequest}>Send request</button>
+          </div>
+
+          {partnerState.status === 'request_sent' && (
+            <p className="info-message">Waiting for your partner to accept the connection...</p>
+          )}
+
+          {partnerState.status === 'request_received' && (
+            <div className="action-buttons">
+              <button className="primary-button" type="button" onClick={acceptConnection}>Accept request</button>
+              <button className="secondary-button" type="button" onClick={declineConnection}>Decline</button>
+            </div>
+          )}
+
+          {partnerState.status === 'connected' && (
+            <button className="secondary-button" type="button" onClick={() => setPartnerState((current) => ({ ...current, status: 'not_connected', partnerName: undefined, partnerCode: undefined, partnerUserId: undefined, unreadCount: 0 }))}>Disconnect Partner</button>
+          )}
+
+          <p className="status-message">{statusMessage}</p>
+        </section>
+
+        <section className="settings-card card-surface">
+          <h2>About couple settings</h2>
+          <p>Your wellness information (cycles, medications, journals, insights) remains completely private. Partner connection only enables shared messaging and date planning—nothing more.</p>
+          <ul>
+            <li>No access to private health data</li>
+            <li>No access to personal journals</li>
+            <li>No access to wellness insights</li>
+            <li>Only shared date adventures and messages</li>
+          </ul>
+        </section>
+      </div>
+    </Module>
+  )
+}
+
+function PersonalSettings({ session, onSignOut, goHome }: { session: Session; onSignOut: () => void; goHome: () => void }) {
   const [name, setName] = useState('')
   const [message, setMessage] = useState('')
   const [partnerMode, setPartnerMode] = useState(false)
@@ -1221,7 +1549,7 @@ function Settings({ session, onSignOut, goHome }: { session: Session; onSignOut:
   }
 
   return (
-    <Module title="Settings" eyebrow="YOUR PRIVATE SPACE" onHome={goHome}>
+    <Module title="Personal Settings" eyebrow="🌸 YOUR PRIVATE SPACE" onHome={goHome}>
       <div className="settings-layout">
         <section className="module-card settings-card">
           <h2>Profile</h2>
@@ -2169,7 +2497,7 @@ function Today({ session, go }: { session: Session; go: (page: Page) => void }) 
           <p className="label">PRIVATE SUPPORT</p>
           <h3>Your wellness space stays yours.</h3>
           <p>Partner access stays optional and fully controlled.</p>
-          <button className="secondary-button support-button" type="button" onClick={() => go('Settings')}>
+          <button className="secondary-button support-button" type="button" onClick={() => go('PersonalSettings')}>
             Manage Access →
           </button>
         </article>
@@ -2204,15 +2532,20 @@ function App() {
     return () => listener.data.subscription.unsubscribe()
   }, [authClient, authUrlError])
 
-  const navigation = [
+  const wellnessNav = [
     { label: 'Today' as Page, icon: Home },
-    { label: 'Date Tickets' as Page, icon: Heart },
     { label: 'Cycle' as Page, icon: Moon },
     { label: 'Symptoms' as Page, icon: Activity },
     { label: 'Medication' as Page, icon: Pill },
     { label: 'Journal' as Page, icon: BookHeart },
     { label: 'Insights' as Page, icon: Sparkles },
-    { label: 'Settings' as Page, icon: SettingsIcon },
+  ]
+
+  const coupleNav = [
+    { label: 'OurSpace' as Page, icon: Heart },
+    { label: 'Messages' as Page, icon: BookHeart },
+    { label: 'DateTickets' as Page, icon: Zap },
+    { label: 'DateVault' as Page, icon: Lock },
   ]
 
   if (authLoading) {
@@ -2275,12 +2608,36 @@ function App() {
         <p className="brand-subtitle">Her personal wellness companion</p>
 
         <nav aria-label="Primary navigation">
-          {navigation.map(({ label, icon: Icon }) => (
-            <button key={label} className={page === label ? 'nav-item active' : 'nav-item'} onClick={() => go(label)}>
-              <Icon size={18} />
-              <span>{label}</span>
+          <div className="nav-section">
+            <span className="nav-section-label">🌸 MY WELLNESS</span>
+            <div className="nav-items">
+              {wellnessNav.map(({ label, icon: Icon }) => (
+                <button key={label} className={page === label ? 'nav-item active' : 'nav-item'} onClick={() => go(label)}>
+                  <Icon size={18} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <div className="nav-section">
+            <span className="nav-section-label">♡ OUR SPACE</span>
+            <div className="nav-items">
+              {coupleNav.map(({ label, icon: Icon }) => (
+                <button key={label} className={page === label ? 'nav-item active' : 'nav-item'} onClick={() => go(label)}>
+                  <Icon size={18} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <div className="nav-section">
+            <button className="nav-item settings-nav" onClick={() => go('PersonalSettings')}>
+              <SettingsIcon size={18} />
+              <span>Settings</span>
             </button>
-          ))}
+          </div>
         </nav>
 
         <div className="sidebar-footer">
@@ -2313,7 +2670,9 @@ function App() {
             <div className="breadcrumb">
               <span>LUNA</span>
               <ChevronRight size={14} />
-              <small>{page}</small>
+              {['Today', 'Cycle', 'Symptoms', 'Medication', 'Journal', 'Insights'].includes(page) && <small>MY WELLNESS / {page}</small>}
+              {['OurSpace', 'Messages', 'DateTickets', 'DateVault'].includes(page) && <small>OUR SPACE / {page}</small>}
+              {['PersonalSettings', 'CoupleSettings'].includes(page) && <small>SETTINGS / {page}</small>}
             </div>
           </div>
 
@@ -2328,13 +2687,17 @@ function App() {
         </header>
 
         {page === 'Today' && <Today session={session} go={go} />}
-        {page === 'Date Tickets' && <DateTicketsPage goHome={goHome} />}
         {page === 'Cycle' && <Cycle session={session} goHome={goHome} />}
         {page === 'Symptoms' && <Symptoms session={session} goHome={goHome} />}
         {page === 'Medication' && <Medication session={session} goHome={goHome} onTestReminder={(kind = 'due') => { scheduleTest?.(10000, kind) }} />}
         {page === 'Journal' && <Journal session={session} goHome={goHome} />}
         {page === 'Insights' && <Insights session={session} goHome={goHome} />}
-        {page === 'Settings' && <Settings session={session} onSignOut={() => void client.auth.signOut()} goHome={goHome} />}
+        {page === 'OurSpace' && <OurSpaceDashboard session={session} goHome={goHome} go={go} />}
+        {page === 'Messages' && <MessagesPage session={session} goHome={goHome} />}
+        {page === 'DateTickets' && <DateTicketsPage goHome={goHome} />}
+        {page === 'DateVault' && <DateVaultPage goHome={goHome} />}
+        {page === 'PersonalSettings' && <PersonalSettings session={session} onSignOut={() => void client.auth.signOut()} goHome={goHome} />}
+        {page === 'CoupleSettings' && <CoupleSettings session={session} goHome={goHome} />}
       </main>
       {reminder && <MedicationAlarm reminder={reminder} onDismiss={dismiss} onTaken={markReminderTaken} />}
     </div>
