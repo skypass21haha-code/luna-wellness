@@ -11,10 +11,29 @@ export type AffirmationCategory =
   | 'calm'
   | 'resilience'
 
+export type LoveAffirmationCategory =
+  | 'random_love'
+  | 'morning_love'
+  | 'afternoon_love'
+  | 'evening_love'
+  | 'goodnight_love'
+  | 'encouragement'
+  | 'appreciation'
+  | 'i_miss_you'
+  | 'little_smile'
+  | 'deep_love'
+
 export type Affirmation = {
   id: string
   text: string
   category: AffirmationCategory
+}
+
+export type LoveAffirmation = {
+  id: string
+  title: string
+  message: string
+  category: LoveAffirmationCategory
 }
 
 export const affirmations: Affirmation[] = [
@@ -74,6 +93,87 @@ export const affirmations: Affirmation[] = [
   { id: 'resilience-04', text: 'Even a small return to yourself counts.', category: 'resilience' },
   { id: 'resilience-05', text: 'You are allowed to rebuild your energy gently.', category: 'resilience' },
 ]
+
+export const loveAffirmations: LoveAffirmation[] = [
+  { id: 'random-01', title: 'A little reminder ♡', message: 'You are deeply loved, exactly as you are.', category: 'random_love' },
+  { id: 'random-02', title: 'Thinking of you 🌷', message: 'Somehow, you found your way into my thoughts again.', category: 'random_love' },
+  { id: 'random-03', title: 'For your heart 💗', message: 'You matter to me more than you probably realize.', category: 'random_love' },
+  { id: 'random-04', title: 'Before you continue ✨', message: 'Take a tiny moment to remember that someone loves you very much.', category: 'random_love' },
+  { id: 'random-05', title: 'Just a note', message: 'No special reason. I just love you. ♡', category: 'random_love' },
+  { id: 'morning-01', title: 'Good morning, love ☀️', message: 'You make my world a little softer just by being in it.', category: 'morning_love' },
+  { id: 'morning-02', title: 'Morning reminder', message: 'I hope today is kind to you, my love.', category: 'morning_love' },
+  { id: 'morning-03', title: 'Wake gently', message: 'You are one of my favorite parts of every day.', category: 'morning_love' },
+  { id: 'afternoon-01', title: 'A quick check-in 💌', message: 'You are thought of, cared for, and loved. Always. ♡', category: 'afternoon_love' },
+  { id: 'afternoon-02', title: 'Midday love', message: 'You deserve all the gentle things life has to offer.', category: 'afternoon_love' },
+  { id: 'afternoon-03', title: 'Tiny pause', message: 'Just checking in with your heart: you are loved.', category: 'afternoon_love' },
+  { id: 'evening-01', title: 'Evening warmth 🌙', message: 'I hope you sleep knowing how loved you are.', category: 'evening_love' },
+  { id: 'evening-02', title: 'Tonight', message: 'Even on ordinary days, you are extraordinary to me.', category: 'evening_love' },
+  { id: 'evening-03', title: 'Sweet evening note', message: 'You crossed my mind again. You always do.', category: 'evening_love' },
+  { id: 'goodnight-01', title: 'Goodnight love 🌙', message: 'Take a breath, sweetheart. You are loved.', category: 'goodnight_love' },
+  { id: 'goodnight-02', title: 'Soft landing', message: 'You do not have to do anything special to be loved.', category: 'goodnight_love' },
+  { id: 'goodnight-03', title: 'Before sleep', message: 'Your existence makes my days brighter.', category: 'goodnight_love' },
+  { id: 'encouragement-01', title: 'You are doing so well', message: 'If you ever forget, let this notification remind you: I love you.', category: 'encouragement' },
+  { id: 'encouragement-02', title: 'Keep going', message: 'You are stronger, softer, and more loved than you know.', category: 'encouragement' },
+  { id: 'encouragement-03', title: 'For your heart', message: 'You are still my favorite thought.', category: 'encouragement' },
+  { id: 'appreciation-01', title: 'I appreciate you', message: 'I’m grateful that I get to love someone like you.', category: 'appreciation' },
+  { id: 'appreciation-02', title: 'Grateful heart', message: 'I’m always grateful for the little moments we share.', category: 'appreciation' },
+  { id: 'appreciation-03', title: 'You matter', message: 'You are a beautiful part of my life.', category: 'appreciation' },
+  { id: 'i-miss-you-01', title: 'Missing you', message: 'I hope something makes you smile today. You deserve it.', category: 'i_miss_you' },
+  { id: 'i-miss-you-02', title: 'A soft reminder', message: 'Just wanted your heart to hear this: you matter so much to me.', category: 'i_miss_you' },
+  { id: 'i-miss-you-03', title: 'Still thinking of you', message: 'Wherever today takes you, remember that you are loved.', category: 'i_miss_you' },
+  { id: 'little-smile-01', title: 'Little smile', message: 'Sending you a little love through this notification. 💗', category: 'little_smile' },
+  { id: 'little-smile-02', title: 'A tiny joy', message: 'You make ordinary moments feel special.', category: 'little_smile' },
+  { id: 'little-smile-03', title: 'Warm thought', message: 'You are someone I will always be grateful for.', category: 'little_smile' },
+  { id: 'deep-love-01', title: 'All my love', message: 'You are deeply loved, appreciated, and treasured more than words can say.', category: 'deep_love' },
+  { id: 'deep-love-02', title: 'My favorite person', message: 'You are more special to me than words can explain.', category: 'deep_love' },
+  { id: 'deep-love-03', title: 'Constant love', message: 'A tiny notification carrying a very big I love you.', category: 'deep_love' },
+  { id: 'deep-love-04', title: 'Always', message: 'You are loved. You are appreciated. You matter to me. And I hope you never forget that.', category: 'deep_love' },
+]
+
+export const loveAffirmationCategories: LoveAffirmationCategory[] = [
+  'random_love',
+  'morning_love',
+  'afternoon_love',
+  'evening_love',
+  'goodnight_love',
+  'encouragement',
+  'appreciation',
+  'i_miss_you',
+  'little_smile',
+  'deep_love',
+]
+
+export function getLoveAffirmationByCategory(category: LoveAffirmationCategory = 'random_love', seed = Date.now()): LoveAffirmation {
+  const matches = loveAffirmations.filter((affirmation) => affirmation.category === category)
+  if (matches.length === 0) {
+    return loveAffirmations[0]
+  }
+
+  const index = Math.abs(Math.floor(seed) % matches.length)
+  return matches[index] || matches[0]
+}
+
+export function getLoveAffirmationForTime(date = new Date()): LoveAffirmation {
+  const hour = date.getHours()
+
+  if (hour >= 5 && hour < 11) {
+    return getLoveAffirmationByCategory('morning_love', date.getTime())
+  }
+
+  if (hour >= 11 && hour < 17) {
+    return getLoveAffirmationByCategory('afternoon_love', date.getTime())
+  }
+
+  if (hour >= 17 && hour < 22) {
+    return getLoveAffirmationByCategory('evening_love', date.getTime())
+  }
+
+  if (hour >= 22 || hour < 5) {
+    return getLoveAffirmationByCategory('goodnight_love', date.getTime())
+  }
+
+  return getLoveAffirmationByCategory('random_love', date.getTime())
+}
 
 export const affirmationFallback: Affirmation = {
   id: 'fallback',

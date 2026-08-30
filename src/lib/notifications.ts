@@ -1,3 +1,5 @@
+import { getLoveAffirmationByCategory, getLoveAffirmationForTime, type LoveAffirmationCategory } from '../data/affirmations'
+
 export type NotificationDiagnostics = {
   supported: boolean
   secureContext: boolean
@@ -104,8 +106,14 @@ export async function sendNotification(title: string, body: string, tag: string)
   }
 }
 
+export async function sendLoveAffirmationNotification(category: LoveAffirmationCategory = 'random_love'): Promise<void> {
+  const affirmation = getLoveAffirmationByCategory(category, Date.now())
+  await sendNotification(affirmation.title, affirmation.message, `luna-love-${affirmation.category}-${affirmation.id}`)
+}
+
 export async function showTestNotification(): Promise<void> {
-  await sendNotification('LUNA', 'Test notification successful. LUNA notifications are working.', 'luna-test-notification')
+  const affirmation = getLoveAffirmationForTime(new Date())
+  await sendNotification(affirmation.title, affirmation.message, `luna-love-${affirmation.category}-${affirmation.id}`)
 }
 
 export async function showMedicationNotification(): Promise<void> {

@@ -1049,14 +1049,14 @@ function Today({ session, go }: { session: Session; go: (page: Page) => void }) 
   return (
     <section className="today-page">
       <section className="welcome">
-        <div>
+        <div className="welcome-copy">
           <p className="eyebrow">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
           <h1>
             Welcome back <span>♡</span>
           </h1>
           <p className="intro">A gentle moment to notice how you are, today.</p>
         </div>
-        <div className="date-orb">
+        <div className="date-orb" aria-label={`Today is ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`}>
           <CalendarDays size={21} />
           <strong>{new Date().getDate()}</strong>
           <span>{new Date().toLocaleDateString('en-US', { month: 'short' })}</span>
@@ -1071,26 +1071,28 @@ function Today({ session, go }: { session: Session; go: (page: Page) => void }) 
           </div>
           <div className="brief-card-body">
             <div className="brief-summary">
-              <div>
-                <p>Good morning, Hazel 🌸</p>
+              <div className="brief-header-copy">
+                <p className="brief-greeting">Good morning, Hazel 🌸</p>
                 <h2>Cycle day 12</h2>
               </div>
               <span className="brief-pill">Low energy</span>
             </div>
+
             <div className="brief-metrics">
-              <div>
+              <div className="metric-block">
                 <span>Sleep</span>
                 <strong>7h 42m</strong>
               </div>
-              <div>
+              <div className="metric-block">
                 <span>Mood</span>
                 <strong>Good</strong>
               </div>
-              <div>
+              <div className="metric-block">
                 <span>Medication</span>
                 <strong>8:00 PM</strong>
               </div>
             </div>
+
             <p className="brief-tip">Take gentle care of yourself today. Keep your rhythm steady and let rest be part of your plan.</p>
           </div>
         </article>
