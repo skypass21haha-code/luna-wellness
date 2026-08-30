@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   Activity,
@@ -15,14 +15,13 @@ import {
   Menu,
   Moon,
   Pill,
+  Search,
   Settings as SettingsIcon,
   ShieldCheck,
   Sparkles,
   SunMedium,
   Trash2,
   X,
-
-  
 } from 'lucide-react'
 import './App.css'
 import { supabase } from './lib/supabase'
@@ -33,7 +32,30 @@ import { DailyAffirmation } from './components/DailyAffirmation'
 import { getAffirmationDateKey } from './lib/affirmationService'
 
 type Session = NonNullable<Awaited<ReturnType<NonNullable<typeof supabase>['auth']['getSession']>>['data']['session']>
-type Page = 'Today' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'Settings'
+type Page = 'Today' | 'Date Tickets' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'Settings'
+type DateTicketStatus = 'unused' | 'redeemed' | 'scheduled' | 'completed'
+type DateTicketCategory = 'heritage' | 'art' | 'exploration' | 'play' | 'creative'
+
+type DateTicket = {
+  id: number
+  title: string
+  category: DateTicketCategory
+  description: string
+  location: string
+  suggestedPlaces: string[]
+  status: DateTicketStatus
+  favorite: boolean
+  date?: string
+  time?: string
+  meetingPlace?: string
+  note?: string
+  completionDate?: string
+  redemptionDate?: string
+  memoryPhoto?: string
+  memoryNote?: string
+  favoriteMoment?: string
+  rating?: number
+}
 
 const today = () => new Date().toISOString().slice(0, 10)
 const messageForError = () => 'LUNA is temporarily offline. Please try again when your connection is restored.'
@@ -50,6 +72,100 @@ const privacyItems = [
   'Partner mode is always optional and can be changed at any time.',
   'Data export and account deletion stay available from your privacy center.',
 ]
+
+const dateTicketCategoryMeta: Record<DateTicketCategory, { label: string; icon: string }> = {
+  heritage: { label: 'Heritage', icon: '🏛️' },
+  art: { label: 'Art', icon: '🎨' },
+  exploration: { label: 'Exploration', icon: '🌆' },
+  play: { label: 'Play', icon: '🎮' },
+  creative: { label: 'Creative', icon: '📸' },
+}
+
+const dateTicketCatalog: Array<Omit<DateTicket, 'status' | 'favorite'>> = [
+  { id: 1, title: 'Intramuros Walking Date', category: 'heritage', description: 'Let\'s get a little lost in the old streets together.', location: 'Intramuros', suggestedPlaces: ['San Agustin Church — Intramuros', 'Manila Cathedral — Intramuros', 'Fort Santiago — Intramuros'] },
+  { id: 2, title: 'Fort Santiago Exploration', category: 'heritage', description: 'Walk the walls, share the stories, and be gentle with every little detail.', location: 'Fort Santiago', suggestedPlaces: ['Fort Santiago — Intramuros', 'Manila Cathedral — Intramuros', 'San Agustin Church — Intramuros'] },
+  { id: 3, title: 'National Museum Date', category: 'art', description: 'A slower, sweeter date with stories, textures, and curiosity.', location: 'National Museum Complex', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'National Museum of Anthropology — Manila', 'National Museum of Natural History — Manila'] },
+  { id: 4, title: 'Binondo Food Crawl', category: 'exploration', description: 'Little bites, warm laughs, and the joy of discovering a favorite corner.', location: 'Binondo', suggestedPlaces: ['Binondo Church — Binondo', 'San Lorenzo Ruiz Church — Binondo', 'Escolta — Manila'] },
+  { id: 5, title: 'Escolta Exploration', category: 'heritage', description: 'A quiet walk through old architecture and lovely neon memories.', location: 'Escolta', suggestedPlaces: ['Escolta — Manila', 'San Sebastian Church — Quiapo', 'Quiapo Church — Manila'] },
+  { id: 6, title: 'Rizal Park Walk', category: 'heritage', description: 'An easy stroll with room for conversations, sunsets, and gentle pauses.', location: 'Rizal Park', suggestedPlaces: ['Rizal Park — Ermita', 'Manila Cathedral — Intramuros', 'Our Lady of Remedies Parish — Malate'] },
+  { id: 7, title: 'Manila Heritage Photography Date', category: 'creative', description: 'Capture the old corners, the light, and the little things that make us smile.', location: 'Manila Heritage District', suggestedPlaces: ['San Agustin Church — Intramuros', 'Manila Cathedral — Intramuros', 'Quiapo Church — Manila'] },
+  { id: 8, title: 'Old Churches & Historic Buildings', category: 'heritage', description: 'A simple date full of old stones, quiet prayers, and beautiful stories.', location: 'Metro Manila Heritage Loop', suggestedPlaces: ['San Agustin Church — Intramuros', 'Manila Cathedral — Intramuros', 'San Sebastian Church — Quiapo'] },
+  { id: 9, title: 'Explore BGC', category: 'exploration', description: 'A modern little adventure with streets, bright lights, and good company.', location: 'Bonifacio Global City', suggestedPlaces: ['BGC Arts Center — Taguig', 'The Mind Museum — Taguig', 'Santuario de San Antonio — Makati'] },
+  { id: 10, title: 'BGC Street-Art / Photo Walk', category: 'creative', description: 'Look around, find the color, and make a little story out of the city.', location: 'BGC', suggestedPlaces: ['BGC Avenue — Taguig', 'The Mind Museum — Taguig', 'Greenbelt — Makati'] },
+  { id: 11, title: 'Makati Walking Date', category: 'exploration', description: 'Slow windows, cozy cafes, and a soft kind of city wandering.', location: 'Makati', suggestedPlaces: ['Greenbelt — Makati', 'Santuario de San Antonio — Makati', 'Nuestra Señora de Gracia Parish — Makati'] },
+  { id: 12, title: 'Greenbelt Exploration', category: 'exploration', description: 'A gentle city date full of lovely corners and easy conversation.', location: 'Greenbelt', suggestedPlaces: ['Greenbelt — Makati', 'Ayala Triangle — Makati', 'Santuario de San Antonio — Makati'] },
+  { id: 13, title: 'Ayala Triangle Area Walk', category: 'exploration', description: 'Take a slow walk, breathe, and let the city feel like a little ceremony.', location: 'Ayala Triangle Gardens', suggestedPlaces: ['Ayala Triangle — Makati', 'Greenbelt — Makati', 'Nuestra Señora de Gracia Parish — Makati'] },
+  { id: 14, title: 'Mall-Hopping Date', category: 'exploration', description: 'A playful little detour through the city, with snacks and wandering as the plan.', location: 'Makati / Metro Manila', suggestedPlaces: ['Greenbelt — Makati', 'SM Mall of Asia — Pasay', 'Ayala Center — Makati'] },
+  { id: 15, title: 'Explore Cubao', category: 'exploration', description: 'A nostalgic route full of color, food, and small surprises.', location: 'Cubao', suggestedPlaces: ['Immaculate Conception Cathedral — Cubao', 'Gateway Mall — Quezon City', 'Araneta Center — Quezon City'] },
+  { id: 16, title: 'Explore Maginhawa', category: 'exploration', description: 'Find a cafe, linger a bit, and keep the afternoon easy.', location: 'Maginhawa', suggestedPlaces: ['Maginhawa Street — Quezon City', 'Holy Family Parish — Quezon City', 'Our Lady of Pentecost Parish — Quezon City'] },
+  { id: 17, title: 'Explore Marikina Local Food Spots', category: 'exploration', description: 'Good food, city charm, and a little adventure around every corner.', location: 'Marikina', suggestedPlaces: ['Marikina Public Market — Marikina', 'Marikina Shoe Capital — Marikina', 'San Pedro Bautista Church — Quezon City'] },
+  { id: 18, title: 'Antipolo Art & Café Day', category: 'exploration', description: 'A little scenic date with coffee, art, and room to breathe.', location: 'Antipolo', suggestedPlaces: ['Antipolo City Viewpoints — Rizal', 'Cafe spots in Antipolo', 'Our Lady of Mt. Carmel Shrine — New Manila'] },
+  { id: 19, title: 'Local Weekend Market Date', category: 'exploration', description: 'Browse little finds, try new things, and make a day out of wandering.', location: 'Weekend Market', suggestedPlaces: ['Mercato Centrale — Pasig', 'Local weekend markets — Metro Manila', 'San Isidro Labrador Parish — Pasig'] },
+  { id: 20, title: 'National Museum of Fine Arts', category: 'art', description: 'Drop into quiet beauty and let the details do the talking.', location: 'Fine Arts Museum', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'National Museum of Anthropology — Manila', 'Rizal Park — Ermita'] },
+  { id: 21, title: 'National Museum of Anthropology', category: 'art', description: 'A date full of stories, culture, and warm curiosity.', location: 'Anthropology Museum', suggestedPlaces: ['National Museum of Anthropology — Manila', 'National Museum of Natural History — Manila', 'Manila Cathedral — Intramuros'] },
+  { id: 22, title: 'National Museum of Natural History', category: 'art', description: 'A little wonder-filled date with plenty of room for surprise.', location: 'Natural History Museum', suggestedPlaces: ['National Museum of Natural History — Manila', 'Rizal Park — Ermita', 'National Museum of Fine Arts — Manila'] },
+  { id: 23, title: 'Independent Art Gallery Date', category: 'art', description: 'Slow down, take in the art, and notice what you love together.', location: 'Independent Gallery', suggestedPlaces: ['Art galleries in Makati', 'Photowalk spots in BGC', 'Cultural Center of the Philippines — Pasay'] },
+  { id: 24, title: 'Contemporary Art Exhibition', category: 'art', description: 'A date that feels a little different and very memorable.', location: 'Contemporary Art Venue', suggestedPlaces: ['Art Fair venues', 'BGC art spaces', 'Museum complex — Manila'] },
+  { id: 25, title: 'Art Appreciation Date', category: 'creative', description: 'Notice the details, talk about what feels alive, and stay curious.', location: 'Museum or Gallery', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'Art galleries in Makati', 'BGC public art walk'] },
+  { id: 26, title: 'Photography Exhibition', category: 'creative', description: 'A story of light, mood, and the way you see the world.', location: 'Gallery or Exhibition Hall', suggestedPlaces: ['BGC arts spaces', 'Rizal Park — Ermita', 'National Museum of Fine Arts — Manila'] },
+  { id: 27, title: 'Immersive Art Experience', category: 'art', description: 'Let the space surprise you and share your favorite little moments.', location: 'Immersive Art Venue', suggestedPlaces: ['BGC digital art spaces', 'Art events in Metro Manila', 'Gallery spaces in Makati'] },
+  { id: 28, title: 'Museum Sketch Date', category: 'creative', description: 'Sketch what catches your eye and keep the afternoon beautifully slow.', location: 'Museum', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'Museum of Anthropology — Manila', 'BGC art walk'] },
+  { id: 29, title: 'Choose Your Favorite Artwork', category: 'creative', description: 'Pick a thing that feels like you and talk about why it speaks to you.', location: 'Gallery', suggestedPlaces: ['Art galleries in Makati', 'Museum complex — Manila', 'BGC arts spaces'] },
+  { id: 30, title: 'Create Stories About Paintings', category: 'creative', description: 'Turn every painting into a tiny story about us and the world.', location: 'Museum or Gallery', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'Art galleries in Makati', 'Cultural Center of the Philippines — Pasay'] },
+  { id: 31, title: 'Aesthetic Photography Date', category: 'creative', description: 'Take the afternoon one frame at a time and let it become your own little film.', location: 'City streets / cafés / parks', suggestedPlaces: ['Rizal Park — Ermita', 'BGC — Taguig', 'Greenbelt — Makati'] },
+  { id: 32, title: 'Cultural Heritage Site Visit', category: 'heritage', description: 'Go where the city tells stories, and let the day unfold gently.', location: 'Heritage District', suggestedPlaces: ['San Agustin Church — Intramuros', 'Manila Cathedral — Intramuros', 'San Sebastian Church — Quiapo'] },
+  { id: 33, title: 'Theater Performance', category: 'art', description: 'An evening to dress up a little and share a beautiful feeling.', location: 'Theater or Cultural Center', suggestedPlaces: ['Cultural Center of the Philippines — Pasay', 'Theater venues in Metro Manila', 'Greenbelt — Makati'] },
+  { id: 34, title: 'Musical Date', category: 'art', description: 'Let the music set the mood and keep the night warm and soft.', location: 'Live Music Venue', suggestedPlaces: ['Live music spots in Makati', 'BGC performance spaces', 'Theater venues in Metro Manila'] },
+  { id: 35, title: 'Public Art Event', category: 'art', description: 'See what the city has made beautiful and make the moment yours.', location: 'Art Walk / Public Event', suggestedPlaces: ['BGC street-art route', 'Makati public art spaces', 'Cultural Center of the Philippines — Pasay'] },
+  { id: 36, title: 'Design Exhibition', category: 'art', description: 'Look closely, talk about what you notice, and let it become a favorite memory.', location: 'Design Museum / Fair', suggestedPlaces: ['Design exhibits in Makati', 'BGC galleries', 'Art spaces in Metro Manila'] },
+  { id: 37, title: 'Bowling Date', category: 'play', description: 'A cheerful little challenge with plenty of laughter and zero pressure.', location: 'Bowling Center', suggestedPlaces: ['Bowling lanes in Metro Manila', 'BGC / Makati spots', 'Mall entertainment centers'] },
+  { id: 38, title: 'Arcade Date', category: 'play', description: 'The perfect excuse to be a little silly and a little competitive.', location: 'Arcade', suggestedPlaces: ['Arcade spots in Makati', 'BGC entertainment', 'Mall arcade areas'] },
+  { id: 39, title: 'Billiards Date', category: 'play', description: 'A relaxed challenge and a very good excuse to stay close together.', location: 'Billiards Hall', suggestedPlaces: ['Pool halls in Metro Manila', 'Arcade + billiards lounges', 'BGC / Makati entertainment districts'] },
+  { id: 40, title: 'Karaoke Date', category: 'play', description: 'Sing a little loud, laugh a little harder, and enjoy the easy joy.', location: 'Karaoke Room', suggestedPlaces: ['Karaoke rooms in Makati', 'Arcade entertainment hubs', 'Mall karaoke spots'] },
+  { id: 41, title: 'Movie Date', category: 'play', description: 'A classic favorite, made even better with your hand in mine.', location: 'Cinema', suggestedPlaces: ['Cinema in Greenbelt', 'Mall cinema spots', 'BGC entertainment districts'] },
+  { id: 42, title: 'Escape Room', category: 'play', description: 'A little bit of teamwork, a little bit of chaos, and a lot of fun.', location: 'Escape Room Venue', suggestedPlaces: ['Gaming and escape room venues', 'Makati entertainment spots', 'BGC activity centers'] },
+  { id: 43, title: 'Board-Game Café Date', category: 'play', description: 'A cozy date with snacks, strategy, and a little playful energy.', location: 'Board Game Café', suggestedPlaces: ['Board game cafés in Quezon City', 'Makati gaming spots', 'Food and game cafes'] },
+  { id: 44, title: 'Roller Skating Date', category: 'play', description: 'A little adventure, a lot of laughter, and a memory worth keeping.', location: 'Skate Rink', suggestedPlaces: ['Skate rinks in Metro Manila', 'Mall entertainment centers', 'BGC / Makati activity venues'] },
+  { id: 45, title: 'Indoor Mini Golf', category: 'play', description: 'Gentle chaos, playful wins, and a perfectly easy afternoon.', location: 'Mini Golf Venue', suggestedPlaces: ['Mini golf venues', 'Mall entertainment zones', 'Indoor activity hubs'] },
+  { id: 46, title: 'Amusement Park Date', category: 'play', description: 'A bright, joyful little world made for laughter and easy magic.', location: 'Amusement Park', suggestedPlaces: ['Theme parks in Metro Manila', 'Outdoor leisure destinations', 'Weekend fun spots'] },
+  { id: 47, title: 'Claw Machine Date', category: 'play', description: 'Tiny wins, silly competition, and a fun little story to remember.', location: 'Arcade or Mall', suggestedPlaces: ['Arcade corners in malls', 'Entertainment zones', 'Mall prize game spots'] },
+  { id: 48, title: 'Arcade Competition', category: 'play', description: 'A little friendly challenge and a lot of laughter when the scores go wild.', location: 'Arcade', suggestedPlaces: ['Arcade spots in Makati', 'Game zones in malls', 'BGC entertainment spots'] },
+  { id: 49, title: 'Basketball Together', category: 'play', description: 'A quick burst of energy that turns into a good story and good company.', location: 'Court', suggestedPlaces: ['Local basketball courts', 'Outdoor parks', 'Community sports areas'] },
+  { id: 50, title: 'Badminton Together', category: 'play', description: 'A little movement, a few laughs, and a date with a rhythm all your own.', location: 'Badminton Court', suggestedPlaces: ['Community sports hubs', 'Sports venues in Metro Manila', 'Local parks / indoor courts'] },
+]
+
+const dateTicketFilterOptions: Array<'all' | DateTicketStatus> = ['all', 'unused', 'scheduled', 'completed']
+
+function getInitialDateTickets(): DateTicket[] {
+  return dateTicketCatalog.map((ticket) => ({ ...ticket, status: 'unused', favorite: false }))
+}
+
+function loadDateTickets() {
+  try {
+    const saved = localStorage.getItem('luna-date-tickets-v1')
+    if (!saved) return getInitialDateTickets()
+
+    const parsed = JSON.parse(saved) as DateTicket[]
+    const byId = new Map(parsed.map((ticket) => [ticket.id, ticket]))
+    return dateTicketCatalog.map((ticket) => ({
+      ...ticket,
+      status: byId.get(ticket.id)?.status ?? 'unused',
+      favorite: byId.get(ticket.id)?.favorite ?? false,
+      date: byId.get(ticket.id)?.date,
+      time: byId.get(ticket.id)?.time,
+      meetingPlace: byId.get(ticket.id)?.meetingPlace,
+      note: byId.get(ticket.id)?.note,
+      completionDate: byId.get(ticket.id)?.completionDate,
+      redemptionDate: byId.get(ticket.id)?.redemptionDate,
+      memoryPhoto: byId.get(ticket.id)?.memoryPhoto,
+      memoryNote: byId.get(ticket.id)?.memoryNote,
+      favoriteMoment: byId.get(ticket.id)?.favoriteMoment,
+      rating: byId.get(ticket.id)?.rating,
+    }))
+  } catch {
+    return getInitialDateTickets()
+  }
+}
 
 function NotificationStatus() {
   const [diagnostics, setDiagnostics] = useState(getNotificationDiagnostics)
@@ -997,6 +1113,448 @@ function Module({ title, eyebrow, children, onHome }: { title: string; eyebrow: 
   )
 }
 
+function DateTicketsPage({ goHome }: { goHome: () => void }) {
+  const [tickets, setTickets] = useState<DateTicket[]>(() => loadDateTickets())
+  const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
+  const [statusFilter, setStatusFilter] = useState<'all' | DateTicketStatus>('all')
+  const [categoryFilter, setCategoryFilter] = useState<'all' | DateTicketCategory>('all')
+  const [search, setSearch] = useState('')
+  const [redeemTicketId, setRedeemTicketId] = useState<number | null>(null)
+  const [randomTicketId, setRandomTicketId] = useState<number | null>(null)
+  const [surpriseTicketId, setSurpriseTicketId] = useState<number | null>(null)
+  const [surpriseReveal, setSurpriseReveal] = useState(false)
+  const [scheduleDraft, setScheduleDraft] = useState({ date: '', time: '', meetingPlace: '', note: '' })
+  const [memoryDraft, setMemoryDraft] = useState({ photo: '', memoryNote: '', favoriteMoment: '', rating: 5 })
+
+  useEffect(() => {
+    localStorage.setItem('luna-date-tickets-v1', JSON.stringify(tickets))
+  }, [tickets])
+
+  const selectedTicket = tickets.find((ticket) => ticket.id === selectedTicketId) ?? null
+  const randomTicket = tickets.find((ticket) => ticket.id === randomTicketId) ?? null
+  const surpriseTicket = tickets.find((ticket) => ticket.id === surpriseTicketId) ?? null
+
+  const filteredTickets = useMemo(() => {
+    const query = search.trim().toLowerCase()
+
+    return tickets.filter((ticket) => {
+      const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter
+      const matchesCategory = categoryFilter === 'all' || ticket.category === categoryFilter
+      const haystack = [ticket.title, ticket.description, ticket.location, ticket.category, ...ticket.suggestedPlaces].join(' ').toLowerCase()
+      const matchesSearch = !query || haystack.includes(query)
+      return matchesStatus && matchesCategory && matchesSearch
+    })
+  }, [tickets, statusFilter, categoryFilter, search])
+
+  const stats = useMemo(() => ({
+    unused: tickets.filter((ticket) => ticket.status === 'unused').length,
+    scheduled: tickets.filter((ticket) => ticket.status === 'scheduled').length,
+    completed: tickets.filter((ticket) => ticket.status === 'completed').length,
+    favorites: tickets.filter((ticket) => ticket.favorite).length,
+  }), [tickets])
+
+  const updateTicket = (id: number, updater: (ticket: DateTicket) => DateTicket) => {
+    setTickets((current) => current.map((ticket) => ticket.id === id ? updater(ticket) : ticket))
+  }
+
+  const openTicket = (id: number) => {
+    const ticket = tickets.find((entry) => entry.id === id)
+    if (!ticket) return
+    setSelectedTicketId(id)
+    setScheduleDraft({
+      date: ticket.date ?? '',
+      time: ticket.time ?? '',
+      meetingPlace: ticket.meetingPlace ?? '',
+      note: ticket.note ?? '',
+    })
+    setMemoryDraft({
+      photo: ticket.memoryPhoto ?? '',
+      memoryNote: ticket.memoryNote ?? '',
+      favoriteMoment: ticket.favoriteMoment ?? '',
+      rating: ticket.rating ?? 5,
+    })
+  }
+
+  const saveSchedule = () => {
+    if (!selectedTicketId) return
+    updateTicket(selectedTicketId, (ticket) => ({
+      ...ticket,
+      status: scheduleDraft.date || scheduleDraft.time || scheduleDraft.meetingPlace || scheduleDraft.note ? 'scheduled' : ticket.status,
+      date: scheduleDraft.date || ticket.date,
+      time: scheduleDraft.time || ticket.time,
+      meetingPlace: scheduleDraft.meetingPlace || ticket.meetingPlace,
+      note: scheduleDraft.note || ticket.note,
+    }))
+  }
+
+  const saveMemory = () => {
+    if (!selectedTicketId) return
+    updateTicket(selectedTicketId, (ticket) => ({
+      ...ticket,
+      memoryPhoto: memoryDraft.photo || ticket.memoryPhoto,
+      memoryNote: memoryDraft.memoryNote || ticket.memoryNote,
+      favoriteMoment: memoryDraft.favoriteMoment || ticket.favoriteMoment,
+      rating: memoryDraft.rating || ticket.rating || 5,
+    }))
+  }
+
+  const markCompleted = () => {
+    if (!selectedTicketId) return
+    updateTicket(selectedTicketId, (ticket) => ({
+      ...ticket,
+      status: 'completed',
+      completionDate: ticket.completionDate || today(),
+      date: ticket.date || today(),
+    }))
+  }
+
+  const redeemTicket = () => {
+    if (!selectedTicketId) return
+    updateTicket(selectedTicketId, (ticket) => ({
+      ...ticket,
+      status: 'redeemed',
+      redemptionDate: ticket.redemptionDate || today(),
+    }))
+    setRedeemTicketId(null)
+  }
+
+  const pickRandomDate = () => {
+    const candidates = tickets.filter((ticket) => ticket.status !== 'completed')
+    const pool = candidates.length > 0 ? candidates : tickets
+    if (pool.length === 0) return
+    const next = pool[Math.floor(Math.random() * pool.length)]
+    setRandomTicketId(next.id)
+  }
+
+  const revealSurpriseDate = () => {
+    const candidates = tickets.filter((ticket) => ticket.status === 'unused')
+    const pool = candidates.length > 0 ? candidates : tickets
+    const next = pool[Math.floor(Math.random() * pool.length)]
+    setSurpriseTicketId(next.id)
+    setSurpriseReveal(false)
+  }
+
+  return (
+    <section className="date-tickets-page">
+      <div className="date-tickets-header">
+        <div>
+          <p className="eyebrow">🎟️ DATE TICKETS</p>
+          <h1>Our date passes</h1>
+          <p className="date-tickets-subtitle">50 little adventures waiting to happen. ♡</p>
+        </div>
+        <div className="date-tickets-actions">
+          <button className="primary-button" type="button" onClick={pickRandomDate}>🎲 Pick our date</button>
+          <button className="secondary-button" type="button" onClick={() => { setSurpriseTicketId(null); setSurpriseReveal(false); revealSurpriseDate() }}>🌙 Surprise me</button>
+        </div>
+      </div>
+
+      <div className="date-stats-bar">
+        <div className="date-stat"><span>🎟️</span><strong>{stats.unused}</strong><small>unused</small></div>
+        <div className="date-stat"><span>📅</span><strong>{stats.scheduled}</strong><small>scheduled</small></div>
+        <div className="date-stat"><span>✨</span><strong>{stats.completed}</strong><small>completed</small></div>
+        <div className="date-stat"><span>♡</span><strong>{stats.favorites}</strong><small>favorites</small></div>
+      </div>
+
+      <div className="date-progress card-surface">
+        <div className="date-progress-copy">
+          <p className="label">OUR DATE COLLECTION</p>
+          <strong>{stats.completed} / {tickets.length} completed</strong>
+        </div>
+        <div className="progress-track" aria-label={`Completed tickets progress: ${stats.completed} of ${tickets.length}`}>
+          <span style={{ width: `${(stats.completed / tickets.length) * 100}%` }} />
+        </div>
+      </div>
+
+      <div className="filter-row card-surface">
+        <label className="search-shell">
+          <Search size={15} />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a date..." aria-label="Search date tickets" />
+        </label>
+
+        <div className="status-filters" aria-label="Ticket status filters">
+          {dateTicketFilterOptions.map((option) => (
+            <button key={option} type="button" className={statusFilter === option ? 'filter-chip active' : 'filter-chip'} onClick={() => setStatusFilter(option)}>
+              {option === 'all' ? 'All' : option.charAt(0).toUpperCase() + option.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="category-scroll" aria-label="Category filters">
+        {(['all', 'heritage', 'art', 'exploration', 'play', 'creative'] as const).map((option) => (
+          <button key={option} type="button" className={categoryFilter === option ? 'category-pill active' : 'category-pill'} onClick={() => setCategoryFilter(option)}>
+            {option === 'all' ? 'All' : `${dateTicketCategoryMeta[option].icon} ${dateTicketCategoryMeta[option].label}`}
+          </button>
+        ))}
+      </div>
+
+      {filteredTickets.length === 0 ? (
+        <div className="empty-date-card card-surface">
+          <p className="eyebrow">NO MATCHES</p>
+          <h3>Nothing here yet.</h3>
+          <p>Try another search or pick a date from the full collection.</p>
+          <button className="primary-button" type="button" onClick={() => { setSearch(''); setCategoryFilter('all'); setStatusFilter('all') }}>Reset filters</button>
+        </div>
+      ) : (
+        <div className="date-ticket-grid">
+          {filteredTickets.map((ticket) => (
+            <article key={ticket.id} className={`date-ticket-card ${ticket.status}`}>
+              <div className="ticket-paper">
+                <div className="ticket-topline">
+                  <span className="ticket-brand">LUNA</span>
+                  <button type="button" className={ticket.favorite ? 'favorite-button active' : 'favorite-button'} onClick={() => updateTicket(ticket.id, (entry) => ({ ...entry, favorite: !entry.favorite }))} aria-label={ticket.favorite ? `Remove ${ticket.title} from favorites` : `Add ${ticket.title} to favorites`}>
+                    {ticket.favorite ? '♥' : '♡'}
+                  </button>
+                </div>
+                <div className="ticket-serial">#{String(ticket.id).padStart(3, '0')}</div>
+                <div className="ticket-title-wrap">
+                  <p className="ticket-label">DATE PASS</p>
+                  <h3>{ticket.title}</h3>
+                </div>
+                <div className="ticket-meta-row">
+                  <span className="ticket-icon">{dateTicketCategoryMeta[ticket.category].icon}</span>
+                  <span className="ticket-meta-label">{dateTicketCategoryMeta[ticket.category].label}</span>
+                </div>
+                <p className="ticket-description">“{ticket.description}”</p>
+                <div className="ticket-footer">
+                  <div>
+                    <small>STATUS</small>
+                    <strong>{ticket.status.toUpperCase()}</strong>
+                  </div>
+                  <button className="ticket-open" type="button" onClick={() => openTicket(ticket.id)}>Open ticket</button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <div className="date-vault card-surface">
+        <div className="date-vault-header">
+          <div>
+            <p className="eyebrow">🔐 DATE VAULT</p>
+            <h2>Saved memories</h2>
+          </div>
+        </div>
+        {tickets.filter((ticket) => ticket.status === 'completed').length === 0 ? (
+          <p className="module-empty">No completed dates yet. The vault is waiting for its first memory.</p>
+        ) : (
+          <div className="date-vault-list">
+            {tickets.filter((ticket) => ticket.status === 'completed').map((ticket) => (
+              <button key={ticket.id} type="button" className="vault-item" onClick={() => openTicket(ticket.id)}>
+                <span>🎟️ #{String(ticket.id).padStart(3, '0')}</span>
+                <strong>{ticket.title}</strong>
+                <small>{ticket.completionDate ?? 'Completed'}</small>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="date-generator card-surface">
+        <div className="date-vault-header">
+          <div>
+            <p className="eyebrow">✨ BUILD A DATE</p>
+            <h2>Pick the mood</h2>
+          </div>
+        </div>
+        <div className="generator-grid">
+          <label>
+            Mood
+            <select defaultValue="cozy">
+              <option value="cozy">🌸 Cozy</option>
+              <option value="creative">🎨 Creative</option>
+              <option value="playful">🎮 Playful</option>
+              <option value="adventurous">🌆 Adventurous</option>
+              <option value="quiet">📚 Quiet</option>
+              <option value="food">🍰 Food-focused</option>
+            </select>
+          </label>
+          <label>
+            Time
+            <select defaultValue="afternoon">
+              <option value="morning">☀️ Morning</option>
+              <option value="afternoon">🌤 Afternoon</option>
+              <option value="evening">🌙 Evening</option>
+            </select>
+          </label>
+          <label>
+            Energy
+            <select defaultValue="medium">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+        </div>
+        <button className="primary-button" type="button" onClick={() => {
+          const pool = tickets.filter((ticket) => ticket.status === 'unused')
+          const next = pool[Math.floor(Math.random() * pool.length)] ?? tickets[0]
+          if (next) openTicket(next.id)
+        }}>Recommend a date</button>
+      </div>
+
+      {selectedTicket && (
+        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setSelectedTicketId(null)}>
+          <div className="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="date-ticket-title" onClick={(event) => event.stopPropagation()}>
+            <button type="button" className="modal-close" aria-label="Close date ticket" onClick={() => setSelectedTicketId(null)}>×</button>
+            <div className="ticket-modal-header">
+              <p className="eyebrow">🌙 LUNA</p>
+              <span className="ticket-modal-number">#{String(selectedTicket.id).padStart(3, '0')}</span>
+            </div>
+            <h3 id="date-ticket-title">{selectedTicket.title}</h3>
+            <div className="ticket-modal-category">
+              <span>{dateTicketCategoryMeta[selectedTicket.category].icon}</span>
+              <strong>{dateTicketCategoryMeta[selectedTicket.category].label}</strong>
+            </div>
+            <p className="ticket-modal-copy">{selectedTicket.description}</p>
+            <div className="ticket-detail-grid">
+              <div><span>Location</span><strong>{selectedTicket.location}</strong></div>
+              <div><span>Status</span><strong>{selectedTicket.status.toUpperCase()}</strong></div>
+              <div><span>Date</span><strong>{selectedTicket.date ?? 'Not scheduled yet'}</strong></div>
+              <div><span>Time</span><strong>{selectedTicket.time ?? 'Flexible'}</strong></div>
+            </div>
+            <div className="suggested-places">
+              <h4>Suggested places</h4>
+              <ul>
+                {selectedTicket.suggestedPlaces.map((place) => (
+                  <li key={place}>{place}</li>
+                ))}
+              </ul>
+            </div>
+
+            {selectedTicket.status !== 'completed' && (
+              <div className="schedule-panel">
+                <h4>Date details</h4>
+                <div className="schedule-grid">
+                  <label>
+                    Date
+                    <input type="date" value={scheduleDraft.date} onChange={(event) => setScheduleDraft((current) => ({ ...current, date: event.target.value }))} />
+                  </label>
+                  <label>
+                    Time
+                    <input type="time" value={scheduleDraft.time} onChange={(event) => setScheduleDraft((current) => ({ ...current, time: event.target.value }))} />
+                  </label>
+                  <label className="full-width">
+                    Meeting place
+                    <input value={scheduleDraft.meetingPlace} onChange={(event) => setScheduleDraft((current) => ({ ...current, meetingPlace: event.target.value }))} placeholder="Optional meeting place" />
+                  </label>
+                  <label className="full-width">
+                    Note
+                    <textarea value={scheduleDraft.note} onChange={(event) => setScheduleDraft((current) => ({ ...current, note: event.target.value }))} placeholder="Can\'t wait for this one ♡" />
+                  </label>
+                </div>
+                <div className="modal-actions">
+                  {selectedTicket.status === 'unused' && (
+                    <button className="primary-button" type="button" onClick={() => setRedeemTicketId(selectedTicket.id)}>Redeem ticket</button>
+                  )}
+                  {selectedTicket.status === 'redeemed' || selectedTicket.status === 'scheduled' ? (
+                    <button className="primary-button" type="button" onClick={saveSchedule}>Save date</button>
+                  ) : null}
+                  {selectedTicket.status !== 'unused' && (
+                    <button className="secondary-button" type="button" onClick={markCompleted}>Mark completed</button>
+                  )}
+                  <button className="secondary-button" type="button" onClick={() => setSelectedTicketId(null)}>Close</button>
+                </div>
+              </div>
+            )}
+
+            {selectedTicket.status === 'completed' && (
+              <div className="memory-panel">
+                <h4>Our date</h4>
+                <div className="schedule-grid">
+                  <label className="full-width">
+                    Photo URL
+                    <input value={memoryDraft.photo} onChange={(event) => setMemoryDraft((current) => ({ ...current, photo: event.target.value }))} placeholder="https://..." />
+                  </label>
+                  <label className="full-width">
+                    Favorite moment
+                    <textarea value={memoryDraft.favoriteMoment} onChange={(event) => setMemoryDraft((current) => ({ ...current, favoriteMoment: event.target.value }))} placeholder="Write something..." />
+                  </label>
+                  <label className="full-width">
+                    Memory note
+                    <textarea value={memoryDraft.memoryNote} onChange={(event) => setMemoryDraft((current) => ({ ...current, memoryNote: event.target.value }))} placeholder="How it felt, what made you smile..." />
+                  </label>
+                  <label>
+                    Rating
+                    <select value={memoryDraft.rating} onChange={(event) => setMemoryDraft((current) => ({ ...current, rating: Number(event.target.value) }))}>
+                      <option value={5}>★★★★★</option>
+                      <option value={4}>★★★★☆</option>
+                      <option value={3}>★★★☆☆</option>
+                      <option value={2}>★★☆☆☆</option>
+                      <option value={1}>★☆☆☆☆</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="modal-actions">
+                  <button className="primary-button" type="button" onClick={saveMemory}>Save memory</button>
+                  <button className="secondary-button" type="button" onClick={() => setSelectedTicketId(null)}>Close</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {redeemTicketId && (
+        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setRedeemTicketId(null)}>
+          <div className="redeem-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <p className="eyebrow">🎟️ REDEEM DATE PASS</p>
+            <h3>Are you sure you want to redeem this date ticket?</h3>
+            <p>Once redeemed, you can schedule your date.</p>
+            <div className="modal-actions">
+              <button className="primary-button" type="button" onClick={redeemTicket}>Yes, redeem it</button>
+              <button className="secondary-button" type="button" onClick={() => setRedeemTicketId(null)}>Not yet</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {randomTicket && (
+        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setRandomTicketId(null)}>
+          <div className="redeem-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <p className="eyebrow">✨ LUNA CHOSE...</p>
+            <h3>{randomTicket.title}</h3>
+            <p>Maybe this one is waiting for you two. ♡</p>
+            <div className="modal-actions">
+              <button className="primary-button" type="button" onClick={() => { setSelectedTicketId(randomTicket.id); setRandomTicketId(null) }}>Open ticket</button>
+              <button className="secondary-button" type="button" onClick={() => { setRandomTicketId(null); pickRandomDate() }}>Try again</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {surpriseTicket && (
+        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setSurpriseTicketId(null)}>
+          <div className="redeem-modal surprise-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <p className="eyebrow">🌙 LUNA HAS A DATE FOR YOU</p>
+            {!surpriseReveal ? (
+              <>
+                <div className="surprise-box">🎁</div>
+                <p>Don\'t peek yet.</p>
+                <button className="primary-button" type="button" onClick={() => setSurpriseReveal(true)}>Reveal</button>
+              </>
+            ) : (
+              <>
+                <h3>{surpriseTicket.title}</h3>
+                <p>{surpriseTicket.description}</p>
+                <div className="modal-actions">
+                  <button className="primary-button" type="button" onClick={() => { setSelectedTicketId(surpriseTicket.id); setSurpriseTicketId(null) }}>Open ticket</button>
+                  <button className="secondary-button" type="button" onClick={() => { setSurpriseTicketId(null); revealSurpriseDate() }}>Try another</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="date-tickets-footer">
+        <button type="button" className="secondary-button" onClick={goHome}>← Back to Dashboard</button>
+      </div>
+    </section>
+  )
+}
+
 function Today({ session, go }: { session: Session; go: (page: Page) => void }) {
   const [checkIn, setCheckIn] = useState({ mood: 'Good', energy: 7, stress: 3, sleep: 'Good' })
   const [status, setStatus] = useState('Not saved yet')
@@ -1251,6 +1809,7 @@ function App() {
 
   const navigation = [
     { label: 'Today' as Page, icon: Home },
+    { label: 'Date Tickets' as Page, icon: Heart },
     { label: 'Cycle' as Page, icon: Moon },
     { label: 'Symptoms' as Page, icon: Activity },
     { label: 'Medication' as Page, icon: Pill },
@@ -1372,6 +1931,7 @@ function App() {
         </header>
 
         {page === 'Today' && <Today session={session} go={go} />}
+        {page === 'Date Tickets' && <DateTicketsPage goHome={goHome} />}
         {page === 'Cycle' && <Cycle session={session} goHome={goHome} />}
         {page === 'Symptoms' && <Symptoms session={session} goHome={goHome} />}
         {page === 'Medication' && <Medication session={session} goHome={goHome} onTestReminder={(kind = 'due') => { scheduleTest?.(10000, kind) }} />}
