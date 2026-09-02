@@ -17,8 +17,8 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data?.type !== 'SHOW_LUNA_REMINDER') return
-  event.waitUntil(self.registration.showNotification('LUNA Reminder', {
-    body: 'Medication reminder',
+  event.waitUntil(self.registration.showNotification('LUNA • Medication Reminder', {
+    body: 'Time to take your medication',  
     tag: event.data.tag || 'luna-medication-reminder',
     data: { url: event.data.url || '/' },
     actions: [{ action: 'open', title: 'Open LUNA' }],

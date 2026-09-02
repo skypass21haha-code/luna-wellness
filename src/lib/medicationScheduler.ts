@@ -129,8 +129,8 @@ export function createMedicationScheduler(client: SupabaseClient, options: Sched
     options.onDue(reminder)
     try {
       const body = reminder.kind === 'advance'
-        ? `${reminder.medicationName} is due in 10 minutes. Scheduled for ${reminder.scheduledLabel}.`
-        : `It is time for ${reminder.medicationName}. Scheduled for ${reminder.scheduledLabel}.`
+        ? `${reminder.medicationName} in 10 minutes. Scheduled for ${reminder.scheduledLabel}.`
+        : `Time for ${reminder.medicationName}. Scheduled for ${reminder.scheduledLabel}.`
       await sendNotification('LUNA • Medication Reminder', body, `luna-medication-${reminder.key}`)
       console.info('[LUNA Notifications] Medication notification sent')
     } catch (error) {

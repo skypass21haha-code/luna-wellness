@@ -1,4 +1,11 @@
-import { getLoveAffirmationByCategory, getLoveAffirmationForTime, type LoveAffirmationCategory } from '../data/affirmations'
+export type NotificationSettings = {
+  medication: boolean
+  couple: boolean
+  affirmation: boolean
+  quietHours: boolean
+  quietStart: string
+  quietEnd: string
+}
 
 export type NotificationDiagnostics = {
   supported: boolean
@@ -8,6 +15,16 @@ export type NotificationDiagnostics = {
   reason?: string
 }
 
+const notificationSettingsKey = 'luna-notification-settings'
+const defaultSettings: NotificationSettings = {
+  medication: true,
+  couple: true,
+  affirmation: true,
+  quietHours: false,
+  quietStart: '22:00',
+  quietEnd: '07:00',
+}
+
 let registrationPromise: Promise<ServiceWorkerRegistration> | null = null
 let registrationError: string | undefined
 
@@ -15,6 +32,51 @@ function capabilityError() {
   if (!('Notification' in window)) return 'Your browser does not support web notifications.'
   if (!window.isSecureContext) return 'Notifications require HTTPS or localhost.'
   return undefined
+}
+
+export function getNotificationSettings(): NotificationSettings {
+  try {
+    const raw = localStorage.getItem(notificationSettingsKey)
+    if (!raw) return defaultSettings
+    const parsed = JSON.parse(raw) as Partial<NotificationSettings>
+    return {
+      medication: parsed.medication ?? defaultSettings.medication,
+      couple: parsed.couple ?? defaultSettings.couple,
+      affirmation: parsed.affirmation ?? defaultSettings.affirmation,
+      quietHours: parsed.quietHours ?? defaultSettings.quietHours,
+      quietStart: parsed.quietStart ?? defaultSettings.quietStart,
+      quietEnd: parsed.quietEnd ?? defaultSettings.quietEnd,
+    }
+  } catch {
+    return defaultSettings
+  }
+}
+
+export function setNotificationSettings(next: Partial<NotificationSettings>) {
+  const current = getNotificationSettings()
+  const merged = { ...current, ...next }
+  localStorage.setItem(notificationSettingsKey, JSON.stringify(merged))
+  return merged
+}
+
+export function isQuietHoursActive(date = new Date()): boolean {
+  const settings = getNotificationSettings()
+  if (!settings.quietHours) return false
+
+  const toMinutes = (value: string) => {
+    const [hours, minutes] = value.split(':').map(Number)
+    return Number.isFinite(hours) && Number.isFinite(minutes) ? (hours * 60) + minutes : 0
+  }
+
+  const startMinutes = toMinutes(settings.quietStart)
+  const endMinutes = toMinutes(settings.quietEnd)
+  const currentMinutes = (date.getHours() * 60) + date.getMinutes()
+
+  if (startMinutes === endMinutes) return true
+  if (startMinutes < endMinutes) {
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes
+  }
+  return currentMinutes >= startMinutes || currentMinutes < endMinutes
 }
 
 export function getNotificationDiagnostics(): NotificationDiagnostics {
@@ -93,6 +155,10 @@ export async function sendNotification(title: string, body: string, tag: string)
     throw new Error(Notification.permission === 'denied' ? 'Notifications are blocked by your browser.' : 'Notification permission is still required.')
   }
 
+  if (tag !== 'luna-test-notification' && isQuietHoursActive()) {
+    throw new Error('Quiet hours are active right now, so the browser reminder was skipped.')
+  }
+
   try {
     const registration = await getNotificationRegistration()
     await registration.showNotification(title, { body, tag, icon: '/icon.svg', badge: '/icon.svg', data: { url: window.location.href } })
@@ -106,17 +172,23 @@ export async function sendNotification(title: string, body: string, tag: string)
   }
 }
 
-export async function sendLoveAffirmationNotification(category: LoveAffirmationCategory = 'random_love'): Promise<void> {
-  const affirmation = getLoveAffirmationByCategory(category, Date.now())
-  await sendNotification(affirmation.title, affirmation.message, `luna-love-${affirmation.category}-${affirmation.id}`)
+export async function sendLoveAffirmationNotification(): Promise<void> {
+  if (!getNotificationSettings().affirmation) return
+  await sendNotification('LUNA • Affirmation', 'Your daily affirmation awaits you.', 'luna-daily-affirmation')
 }
 
 export async function showTestNotification(): Promise<void> {
-  const affirmation = getLoveAffirmationForTime(new Date())
-  await sendNotification(affirmation.title, affirmation.message, `luna-love-${affirmation.category}-${affirmation.id}`)
+  await sendNotification('LUNA • Test Notification', 'Notifications are working! You will receive reminders and affirmations here.', 'luna-test-notification')
 }
 
-export async function showMedicationNotification(): Promise<void> {
+export async function showMedicationNotification(body = 'Medication reminder'): Promise<void> {
+  if (!getNotificationSettings().medication) return
   if (getNotificationDiagnostics().permission !== 'granted') return
-  await sendNotification('LUNA Reminder', 'Medication reminder', 'luna-medication-reminder')
+  await sendNotification('LUNA • Medication Reminder', body, 'luna-medication-reminder')
+}
+
+export async function showPartnerReminderNotification(name: string, body?: string): Promise<void> {
+  if (!getNotificationSettings().couple) return
+  if (getNotificationDiagnostics().permission !== 'granted') return
+  await sendNotification('LUNA • Jam Reminder', body || `${name} is waiting for you in your shared space.`, 'luna-partner-reminder')
 }

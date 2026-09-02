@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   Activity,
@@ -26,56 +26,36 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { supabase } from './lib/supabase'
-import { getNotificationDiagnostics, refreshNotificationStatus, requestNotificationPermission, showTestNotification } from './lib/notifications'
+import { getNotificationDiagnostics, getNotificationSettings, refreshNotificationStatus, requestNotificationPermission, setNotificationSettings, showPartnerReminderNotification, showTestNotification } from './lib/notifications'
 import { createMedicationScheduler, type MedicationReminder } from './lib/medicationScheduler'
 import { consumeAuthUrlError, friendlyAuthError, getAuthRedirectUrl } from './lib/auth'
 import { DailyAffirmation } from './components/DailyAffirmation'
 import { getAffirmationDateKey } from './lib/affirmationService'
+import {
+  acceptPartnerRequest,
+  cancelPartnerRequest,
+  createDateTicket,
+  disconnectPartnerConnection,
+  ensureLunaCode,
+  fetchActiveConnection,
+  fetchDateTicketsForConnection,
+  fetchIncomingRequests,
+  fetchLatestOutgoingRequest,
+  fetchOwnProfile,
+  fetchPartnerMessages,
+  fetchPartnerProfile,
+  lookupPartnerByCode,
+  sendPartnerMessage,
+  sendPartnerRequest,
+  subscribePartnerEvents,
+  declinePartnerRequest,
+} from './lib/partnerService'
 
 type Session = NonNullable<Awaited<ReturnType<NonNullable<typeof supabase>['auth']['getSession']>>['data']['session']>
 type Page = 'Today' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'OurSpace' | 'Messages' | 'DateTickets' | 'DateVault' | 'PersonalSettings' | 'CoupleSettings'
 type PartnerConnectionStatus = 'not_connected' | 'request_sent' | 'request_received' | 'connected' | 'declined' | 'disconnected'
 type PartnerMessage = { id: string; senderId: string; content: string; createdAt: string; readAt?: string }
 type PartnerState = { status: PartnerConnectionStatus; myCode: string; partnerUserId?: string; partnerName?: string; partnerCode?: string; connectedAt?: string; unreadCount: number; messages: PartnerMessage[] }
-type DateTicketStatus = 'unused' | 'revealed' | 'redeemed' | 'scheduled' | 'completed'
-type DateTicketCategory = 'heritage' | 'art' | 'exploration' | 'play' | 'creative'
-type DatePrepPriority = 'essential' | 'recommended' | 'optional'
-type DatePrepProfile = {
-  environment: string[]
-  essentials: string[]
-  recommended: string[]
-  optional: string[]
-}
-type ComfortPreferences = {
-  keepCool: boolean
-  preferShade: boolean
-  preferIndoor: boolean
-  avoidExcessiveWalking: boolean
-  preferLessCrowded: boolean
-}
-type DateTicket = {
-  id: number
-  title: string
-  category: DateTicketCategory
-  description: string
-  location: string
-  suggestedPlaces: string[]
-  status: DateTicketStatus
-  favorite: boolean
-  prep?: DatePrepProfile
-  prepChecklist?: Record<string, boolean>
-  date?: string
-  time?: string
-  meetingPlace?: string
-  note?: string
-  completionDate?: string
-  redemptionDate?: string
-  revealedAt?: string
-  memoryPhoto?: string
-  memoryNote?: string
-  favoriteMoment?: string
-  rating?: number
-}
 
 const today = () => new Date().toISOString().slice(0, 10)
 const messageForError = () => 'LUNA is temporarily offline. Please try again when your connection is restored.'
@@ -146,261 +126,6 @@ const privacyItems = [
   'Partner mode is always optional and can be changed at any time.',
   'Data export and account deletion stay available from your privacy center.',
 ]
-
-const dateTicketCategoryMeta: Record<DateTicketCategory, { label: string; icon: string }> = {
-  heritage: { label: 'Heritage', icon: '🏛️' },
-  art: { label: 'Art', icon: '🎨' },
-  exploration: { label: 'Exploration', icon: '🌆' },
-  play: { label: 'Play', icon: '🎮' },
-  creative: { label: 'Creative', icon: '📸' },
-}
-
-const datePrepItemMeta: Record<string, { label: string; icon: string; priority: DatePrepPriority }> = {
-  phone: { label: 'Phone', icon: '📱', priority: 'essential' },
-  wallet: { label: 'Wallet', icon: '💳', priority: 'essential' },
-  power_bank: { label: 'Power bank', icon: '🔋', priority: 'essential' },
-  charging_cable: { label: 'Charging cable', icon: '🔌', priority: 'recommended' },
-  water: { label: 'Water', icon: '💧', priority: 'essential' },
-  portable_fan: { label: 'Portable fan', icon: '🌬️', priority: 'essential' },
-  umbrella: { label: 'Umbrella', icon: '☂️', priority: 'recommended' },
-  sunscreen: { label: 'Sunscreen', icon: '☀️', priority: 'recommended' },
-  hat: { label: 'Cap or hat', icon: '🧢', priority: 'recommended' },
-  cooling_towel: { label: 'Cooling towel', icon: '🧊', priority: 'recommended' },
-  comfortable_shoes: { label: 'Comfortable shoes', icon: '👟', priority: 'essential' },
-  tissues: { label: 'Tissues', icon: '🧻', priority: 'recommended' },
-  wet_wipes: { label: 'Wet wipes', icon: '🧼', priority: 'recommended' },
-  hand_sanitizer: { label: 'Hand sanitizer', icon: '🧴', priority: 'recommended' },
-  deodorant: { label: 'Deodorant', icon: '🌸', priority: 'recommended' },
-  breath_mints: { label: 'Breath mints', icon: '🍬', priority: 'recommended' },
-  reusable_bag: { label: 'Reusable bag', icon: '👜', priority: 'recommended' },
-  cash: { label: 'Cash', icon: '💵', priority: 'recommended' },
-  camera: { label: 'Camera', icon: '📸', priority: 'optional' },
-  sketchbook: { label: 'Sketchbook', icon: '✏️', priority: 'optional' },
-  pencil: { label: 'Pencil', icon: '✏️', priority: 'optional' },
-  small_towel: { label: 'Small towel', icon: '🧢', priority: 'recommended' },
-  extra_shirt: { label: 'Extra shirt', icon: '👕', priority: 'recommended' },
-  breathable_clothing: { label: 'Breathable clothing', icon: '🌿', priority: 'recommended' },
-  waterproof_phone_pouch: { label: 'Waterproof phone pouch', icon: '📦', priority: 'optional' },
-  shaded_break: { label: 'Shaded break', icon: '🏠', priority: 'recommended' },
-  indoor_alternative: { label: 'Indoor alternative', icon: '🏡', priority: 'recommended' },
-  earlier_start_time: { label: 'Earlier time slot', icon: '⏰', priority: 'recommended' },
-  spirit: { label: 'A little excitement', icon: '♡', priority: 'optional' },
-}
-
-const datePrepProfiles: Record<number, DatePrepProfile> = {
-  1: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'portable_fan', 'comfortable_shoes'], recommended: ['umbrella', 'sunscreen', 'hat', 'tissues', 'power_bank'], optional: ['camera'] },
-  2: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'portable_fan', 'comfortable_shoes'], recommended: ['umbrella', 'sunscreen', 'hat', 'power_bank'], optional: ['camera'] },
-  3: { environment: ['indoor', 'walking', 'art'], essentials: ['water', 'comfortable_shoes', 'phone'], recommended: ['power_bank', 'tissues', 'hand_sanitizer'], optional: ['camera'] },
-  4: { environment: ['food', 'walking', 'city'], essentials: ['water', 'tissues', 'hand_sanitizer'], recommended: ['portable_fan', 'cash', 'power_bank', 'reusable_bag'], optional: ['camera'] },
-  5: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'comfortable_shoes'], recommended: ['umbrella', 'portable_fan', 'power_bank', 'tissues'], optional: ['camera'] },
-  6: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'comfortable_shoes'], recommended: ['umbrella', 'sunscreen', 'hat', 'portable_fan'], optional: ['camera'] },
-  7: { environment: ['outdoor', 'creative', 'heritage'], essentials: ['phone', 'water', 'power_bank'], recommended: ['camera', 'umbrella', 'comfortable_shoes'], optional: ['sketchbook'] },
-  8: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'comfortable_shoes'], recommended: ['umbrella', 'portable_fan', 'tissues', 'power_bank'], optional: ['camera'] },
-  9: { environment: ['outdoor', 'exploration', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank', 'tissues'], optional: ['camera'] },
-  10: { environment: ['outdoor', 'creative', 'city'], essentials: ['phone', 'water', 'power_bank'], recommended: ['portable_fan', 'umbrella', 'comfortable_shoes'], optional: ['camera'] },
-  11: { environment: ['outdoor', 'exploration', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
-  12: { environment: ['outdoor', 'exploration', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
-  13: { environment: ['outdoor', 'exploration', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'tissues'], optional: ['camera'] },
-  14: { environment: ['outdoor', 'city', 'exploration'], essentials: ['water', 'power_bank', 'wallet'], recommended: ['comfortable_shoes', 'portable_fan', 'umbrella'], optional: ['camera'] },
-  15: { environment: ['outdoor', 'walking', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'power_bank', 'tissues'], optional: ['camera'] },
-  16: { environment: ['outdoor', 'walking', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
-  17: { environment: ['food', 'walking', 'city'], essentials: ['water', 'tissues', 'hand_sanitizer'], recommended: ['portable_fan', 'cash', 'reusable_bag', 'power_bank'], optional: ['camera'] },
-  18: { environment: ['outdoor', 'coffee', 'exploration'], essentials: ['water', 'portable_fan'], recommended: ['umbrella', 'cash', 'power_bank', 'sunscreen'], optional: ['camera'] },
-  19: { environment: ['outdoor', 'food', 'market'], essentials: ['water', 'wallet', 'cash'], recommended: ['portable_fan', 'tissues', 'reusable_bag', 'power_bank'], optional: ['camera'] },
-  20: { environment: ['indoor', 'walking', 'art'], essentials: ['water', 'comfortable_shoes'], recommended: ['phone', 'power_bank', 'tissues'], optional: ['sketchbook'] },
-  21: { environment: ['indoor', 'art', 'walking'], essentials: ['water', 'comfortable_shoes'], recommended: ['phone', 'power_bank', 'tissues'], optional: ['camera'] },
-  22: { environment: ['indoor', 'art', 'walking'], essentials: ['water', 'comfortable_shoes'], recommended: ['phone', 'power_bank', 'tissues'], optional: ['camera'] },
-  23: { environment: ['indoor', 'art', 'gallery'], essentials: ['phone', 'water'], recommended: ['power_bank', 'comfortable_shoes', 'tissues'], optional: ['camera'] },
-  24: { environment: ['indoor', 'art'], essentials: ['water', 'phone'], recommended: ['power_bank', 'comfortable_shoes', 'tissues'], optional: ['camera'] },
-  25: { environment: ['indoor', 'creative', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'comfortable_shoes', 'tissues'], optional: ['sketchbook'] },
-  26: { environment: ['indoor', 'creative', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'camera', 'comfortable_shoes'], optional: ['sketchbook'] },
-  27: { environment: ['indoor', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'camera', 'comfortable_shoes'], optional: ['sketchbook'] },
-  28: { environment: ['indoor', 'art', 'creative'], essentials: ['water', 'phone'], recommended: ['sketchbook', 'pencil', 'power_bank'], optional: ['camera'] },
-  29: { environment: ['indoor', 'art', 'creative'], essentials: ['phone', 'water'], recommended: ['power_bank', 'camera', 'tissues'], optional: ['sketchbook'] },
-  30: { environment: ['indoor', 'art', 'creative'], essentials: ['phone', 'water'], recommended: ['power_bank', 'camera', 'tissues'], optional: ['sketchbook'] },
-  31: { environment: ['outdoor', 'creative', 'photography'], essentials: ['phone', 'water', 'power_bank'], recommended: ['camera', 'comfortable_shoes', 'umbrella'], optional: ['sketchbook'] },
-  32: { environment: ['outdoor', 'walking', 'heritage'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
-  33: { environment: ['indoor', 'art'], essentials: ['phone', 'wallet'], recommended: ['power_bank', 'water', 'comfortable_shoes'], optional: ['camera'] },
-  34: { environment: ['indoor', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'comfortable_shoes'], optional: ['camera'] },
-  35: { environment: ['outdoor', 'art', 'city'], essentials: ['water', 'comfortable_shoes'], recommended: ['portable_fan', 'umbrella', 'power_bank'], optional: ['camera'] },
-  36: { environment: ['indoor', 'art'], essentials: ['phone', 'water'], recommended: ['power_bank', 'comfortable_shoes', 'tissues'], optional: ['camera'] },
-  37: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
-  38: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
-  39: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
-  40: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
-  41: { environment: ['indoor', 'play'], essentials: ['phone', 'wallet'], recommended: ['water', 'power_bank', 'tissues'], optional: ['camera'] },
-  42: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
-  43: { environment: ['indoor', 'play'], essentials: ['water', 'phone'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['camera'] },
-  44: { environment: ['indoor', 'physical_activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['small_towel', 'extra_shirt', 'power_bank', 'comfortable_clothing'], optional: ['camera'] },
-  45: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
-  46: { environment: ['outdoor', 'walking', 'activity'], essentials: ['water', 'portable_fan', 'comfortable_shoes'], recommended: ['umbrella', 'sunscreen', 'hat', 'power_bank', 'tissues'], optional: ['camera'] },
-  47: { environment: ['indoor', 'play'], essentials: ['water', 'phone'], recommended: ['power_bank', 'tissues', 'wallet'], optional: ['camera'] },
-  48: { environment: ['indoor', 'activity'], essentials: ['water', 'comfortable_shoes'], recommended: ['tissues', 'power_bank', 'comfortable_clothing'], optional: ['small_towel'] },
-  49: { environment: ['outdoor', 'physical_activity'], essentials: ['water', 'comfortable_clothing'], recommended: ['small_towel', 'extra_shirt', 'power_bank'], optional: ['camera'] },
-  50: { environment: ['outdoor', 'physical_activity'], essentials: ['water', 'comfortable_clothing'], recommended: ['small_towel', 'extra_shirt', 'power_bank'], optional: ['camera'] },
-}
-
-const defaultComfortPreferences: ComfortPreferences = {
-  keepCool: true,
-  preferShade: true,
-  preferIndoor: false,
-  avoidExcessiveWalking: false,
-  preferLessCrowded: true,
-}
-
-function loadComfortPreferences(): ComfortPreferences {
-  try {
-    const saved = localStorage.getItem('luna-date-comfort-preferences-v1')
-    if (!saved) return defaultComfortPreferences
-    const parsed = JSON.parse(saved) as Partial<ComfortPreferences>
-    return { ...defaultComfortPreferences, ...parsed }
-  } catch {
-    return defaultComfortPreferences
-  }
-}
-
-const dateTicketCatalog: Array<Omit<DateTicket, 'status' | 'favorite'>> = [
-  { id: 1, title: 'Intramuros Walking Date', category: 'heritage', description: 'Let\'s get a little lost in the old streets together.', location: 'Intramuros', suggestedPlaces: ['San Agustin Church — Intramuros', 'Manila Cathedral — Intramuros', 'Fort Santiago — Intramuros'] },
-  { id: 2, title: 'Fort Santiago Exploration', category: 'heritage', description: 'Walk the walls, share the stories, and be gentle with every little detail.', location: 'Fort Santiago', suggestedPlaces: ['Fort Santiago — Intramuros', 'Manila Cathedral — Intramuros', 'San Agustin Church — Intramuros'] },
-  { id: 3, title: 'National Museum Date', category: 'art', description: 'A slower, sweeter date with stories, textures, and curiosity.', location: 'National Museum Complex', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'National Museum of Anthropology — Manila', 'National Museum of Natural History — Manila'] },
-  { id: 4, title: 'Binondo Food Crawl', category: 'exploration', description: 'Little bites, warm laughs, and the joy of discovering a favorite corner.', location: 'Binondo', suggestedPlaces: ['Binondo Church — Binondo', 'San Lorenzo Ruiz Church — Binondo', 'Escolta — Manila'] },
-  { id: 5, title: 'Escolta Exploration', category: 'heritage', description: 'A quiet walk through old architecture and lovely neon memories.', location: 'Escolta', suggestedPlaces: ['Escolta — Manila', 'San Sebastian Church — Quiapo', 'Quiapo Church — Manila'] },
-  { id: 6, title: 'Rizal Park Walk', category: 'heritage', description: 'An easy stroll with room for conversations, sunsets, and gentle pauses.', location: 'Rizal Park', suggestedPlaces: ['Rizal Park — Ermita', 'Manila Cathedral — Intramuros', 'Our Lady of Remedies Parish — Malate'] },
-  { id: 7, title: 'Manila Heritage Photography Date', category: 'creative', description: 'Capture the old corners, the light, and the little things that make us smile.', location: 'Manila Heritage District', suggestedPlaces: ['San Agustin Church — Intramuros', 'Manila Cathedral — Intramuros', 'Quiapo Church — Manila'] },
-  { id: 8, title: 'Old Churches & Historic Buildings', category: 'heritage', description: 'A simple date full of old stones, quiet prayers, and beautiful stories.', location: 'Metro Manila Heritage Loop', suggestedPlaces: ['San Agustin Church — Intramuros', 'Manila Cathedral — Intramuros', 'San Sebastian Church — Quiapo'] },
-  { id: 9, title: 'Explore BGC', category: 'exploration', description: 'A modern little adventure with streets, bright lights, and good company.', location: 'Bonifacio Global City', suggestedPlaces: ['BGC Arts Center — Taguig', 'The Mind Museum — Taguig', 'Santuario de San Antonio — Makati'] },
-  { id: 10, title: 'BGC Street-Art / Photo Walk', category: 'creative', description: 'Look around, find the color, and make a little story out of the city.', location: 'BGC', suggestedPlaces: ['BGC Avenue — Taguig', 'The Mind Museum — Taguig', 'Greenbelt — Makati'] },
-  { id: 11, title: 'Makati Walking Date', category: 'exploration', description: 'Slow windows, cozy cafes, and a soft kind of city wandering.', location: 'Makati', suggestedPlaces: ['Greenbelt — Makati', 'Santuario de San Antonio — Makati', 'Nuestra Señora de Gracia Parish — Makati'] },
-  { id: 12, title: 'Greenbelt Exploration', category: 'exploration', description: 'A gentle city date full of lovely corners and easy conversation.', location: 'Greenbelt', suggestedPlaces: ['Greenbelt — Makati', 'Ayala Triangle — Makati', 'Santuario de San Antonio — Makati'] },
-  { id: 13, title: 'Ayala Triangle Area Walk', category: 'exploration', description: 'Take a slow walk, breathe, and let the city feel like a little ceremony.', location: 'Ayala Triangle Gardens', suggestedPlaces: ['Ayala Triangle — Makati', 'Greenbelt — Makati', 'Nuestra Señora de Gracia Parish — Makati'] },
-  { id: 14, title: 'Mall-Hopping Date', category: 'exploration', description: 'A playful little detour through the city, with snacks and wandering as the plan.', location: 'Makati / Metro Manila', suggestedPlaces: ['Greenbelt — Makati', 'SM Mall of Asia — Pasay', 'Ayala Center — Makati'] },
-  { id: 15, title: 'Explore Cubao', category: 'exploration', description: 'A nostalgic route full of color, food, and small surprises.', location: 'Cubao', suggestedPlaces: ['Immaculate Conception Cathedral — Cubao', 'Gateway Mall — Quezon City', 'Araneta Center — Quezon City'] },
-  { id: 16, title: 'Explore Maginhawa', category: 'exploration', description: 'Find a cafe, linger a bit, and keep the afternoon easy.', location: 'Maginhawa', suggestedPlaces: ['Maginhawa Street — Quezon City', 'Holy Family Parish — Quezon City', 'Our Lady of Pentecost Parish — Quezon City'] },
-  { id: 17, title: 'Explore Marikina Local Food Spots', category: 'exploration', description: 'Good food, city charm, and a little adventure around every corner.', location: 'Marikina', suggestedPlaces: ['Marikina Public Market — Marikina', 'Marikina Shoe Capital — Marikina', 'San Pedro Bautista Church — Quezon City'] },
-  { id: 18, title: 'Antipolo Art & Café Day', category: 'exploration', description: 'A little scenic date with coffee, art, and room to breathe.', location: 'Antipolo', suggestedPlaces: ['Antipolo City Viewpoints — Rizal', 'Cafe spots in Antipolo', 'Our Lady of Mt. Carmel Shrine — New Manila'] },
-  { id: 19, title: 'Local Weekend Market Date', category: 'exploration', description: 'Browse little finds, try new things, and make a day out of wandering.', location: 'Weekend Market', suggestedPlaces: ['Mercato Centrale — Pasig', 'Local weekend markets — Metro Manila', 'San Isidro Labrador Parish — Pasig'] },
-  { id: 20, title: 'National Museum of Fine Arts', category: 'art', description: 'Drop into quiet beauty and let the details do the talking.', location: 'Fine Arts Museum', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'National Museum of Anthropology — Manila', 'Rizal Park — Ermita'] },
-  { id: 21, title: 'National Museum of Anthropology', category: 'art', description: 'A date full of stories, culture, and warm curiosity.', location: 'Anthropology Museum', suggestedPlaces: ['National Museum of Anthropology — Manila', 'National Museum of Natural History — Manila', 'Manila Cathedral — Intramuros'] },
-  { id: 22, title: 'National Museum of Natural History', category: 'art', description: 'A little wonder-filled date with plenty of room for surprise.', location: 'Natural History Museum', suggestedPlaces: ['National Museum of Natural History — Manila', 'Rizal Park — Ermita', 'National Museum of Fine Arts — Manila'] },
-  { id: 23, title: 'Independent Art Gallery Date', category: 'art', description: 'Slow down, take in the art, and notice what you love together.', location: 'Independent Gallery', suggestedPlaces: ['Art galleries in Makati', 'Photowalk spots in BGC', 'Cultural Center of the Philippines — Pasay'] },
-  { id: 24, title: 'Contemporary Art Exhibition', category: 'art', description: 'A date that feels a little different and very memorable.', location: 'Contemporary Art Venue', suggestedPlaces: ['Art Fair venues', 'BGC art spaces', 'Museum complex — Manila'] },
-  { id: 25, title: 'Art Appreciation Date', category: 'creative', description: 'Notice the details, talk about what feels alive, and stay curious.', location: 'Museum or Gallery', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'Art galleries in Makati', 'BGC public art walk'] },
-  { id: 26, title: 'Photography Exhibition', category: 'creative', description: 'A story of light, mood, and the way you see the world.', location: 'Gallery or Exhibition Hall', suggestedPlaces: ['BGC arts spaces', 'Rizal Park — Ermita', 'National Museum of Fine Arts — Manila'] },
-  { id: 27, title: 'Immersive Art Experience', category: 'art', description: 'Let the space surprise you and share your favorite little moments.', location: 'Immersive Art Venue', suggestedPlaces: ['BGC digital art spaces', 'Art events in Metro Manila', 'Gallery spaces in Makati'] },
-  { id: 28, title: 'Museum Sketch Date', category: 'creative', description: 'Sketch what catches your eye and keep the afternoon beautifully slow.', location: 'Museum', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'Museum of Anthropology — Manila', 'BGC art walk'] },
-  { id: 29, title: 'Choose Your Favorite Artwork', category: 'creative', description: 'Pick a thing that feels like you and talk about why it speaks to you.', location: 'Gallery', suggestedPlaces: ['Art galleries in Makati', 'Museum complex — Manila', 'BGC arts spaces'] },
-  { id: 30, title: 'Create Stories About Paintings', category: 'creative', description: 'Turn every painting into a tiny story about us and the world.', location: 'Museum or Gallery', suggestedPlaces: ['National Museum of Fine Arts — Manila', 'Art galleries in Makati', 'Cultural Center of the Philippines — Pasay'] },
-  { id: 31, title: 'Aesthetic Photography Date', category: 'creative', description: 'Take the afternoon one frame at a time and let it become your own little film.', location: 'City streets / cafés / parks', suggestedPlaces: ['Rizal Park — Ermita', 'BGC — Taguig', 'Greenbelt — Makati'] },
-  { id: 32, title: 'Cultural Heritage Site Visit', category: 'heritage', description: 'Go where the city tells stories, and let the day unfold gently.', location: 'Heritage District', suggestedPlaces: ['San Agustin Church — Intramuros', 'Manila Cathedral — Intramuros', 'San Sebastian Church — Quiapo'] },
-  { id: 33, title: 'Theater Performance', category: 'art', description: 'An evening to dress up a little and share a beautiful feeling.', location: 'Theater or Cultural Center', suggestedPlaces: ['Cultural Center of the Philippines — Pasay', 'Theater venues in Metro Manila', 'Greenbelt — Makati'] },
-  { id: 34, title: 'Musical Date', category: 'art', description: 'Let the music set the mood and keep the night warm and soft.', location: 'Live Music Venue', suggestedPlaces: ['Live music spots in Makati', 'BGC performance spaces', 'Theater venues in Metro Manila'] },
-  { id: 35, title: 'Public Art Event', category: 'art', description: 'See what the city has made beautiful and make the moment yours.', location: 'Art Walk / Public Event', suggestedPlaces: ['BGC street-art route', 'Makati public art spaces', 'Cultural Center of the Philippines — Pasay'] },
-  { id: 36, title: 'Design Exhibition', category: 'art', description: 'Look closely, talk about what you notice, and let it become a favorite memory.', location: 'Design Museum / Fair', suggestedPlaces: ['Design exhibits in Makati', 'BGC galleries', 'Art spaces in Metro Manila'] },
-  { id: 37, title: 'Bowling Date', category: 'play', description: 'A cheerful little challenge with plenty of laughter and zero pressure.', location: 'Bowling Center', suggestedPlaces: ['Bowling lanes in Metro Manila', 'BGC / Makati spots', 'Mall entertainment centers'] },
-  { id: 38, title: 'Arcade Date', category: 'play', description: 'The perfect excuse to be a little silly and a little competitive.', location: 'Arcade', suggestedPlaces: ['Arcade spots in Makati', 'BGC entertainment', 'Mall arcade areas'] },
-  { id: 39, title: 'Billiards Date', category: 'play', description: 'A relaxed challenge and a very good excuse to stay close together.', location: 'Billiards Hall', suggestedPlaces: ['Pool halls in Metro Manila', 'Arcade + billiards lounges', 'BGC / Makati entertainment districts'] },
-  { id: 40, title: 'Karaoke Date', category: 'play', description: 'Sing a little loud, laugh a little harder, and enjoy the easy joy.', location: 'Karaoke Room', suggestedPlaces: ['Karaoke rooms in Makati', 'Arcade entertainment hubs', 'Mall karaoke spots'] },
-  { id: 41, title: 'Movie Date', category: 'play', description: 'A classic favorite, made even better with your hand in mine.', location: 'Cinema', suggestedPlaces: ['Cinema in Greenbelt', 'Mall cinema spots', 'BGC entertainment districts'] },
-  { id: 42, title: 'Escape Room', category: 'play', description: 'A little bit of teamwork, a little bit of chaos, and a lot of fun.', location: 'Escape Room Venue', suggestedPlaces: ['Gaming and escape room venues', 'Makati entertainment spots', 'BGC activity centers'] },
-  { id: 43, title: 'Board-Game Café Date', category: 'play', description: 'A cozy date with snacks, strategy, and a little playful energy.', location: 'Board Game Café', suggestedPlaces: ['Board game cafés in Quezon City', 'Makati gaming spots', 'Food and game cafes'] },
-  { id: 44, title: 'Roller Skating Date', category: 'play', description: 'A little adventure, a lot of laughter, and a memory worth keeping.', location: 'Skate Rink', suggestedPlaces: ['Skate rinks in Metro Manila', 'Mall entertainment centers', 'BGC / Makati activity venues'] },
-  { id: 45, title: 'Indoor Mini Golf', category: 'play', description: 'Gentle chaos, playful wins, and a perfectly easy afternoon.', location: 'Mini Golf Venue', suggestedPlaces: ['Mini golf venues', 'Mall entertainment zones', 'Indoor activity hubs'] },
-  { id: 46, title: 'Amusement Park Date', category: 'play', description: 'A bright, joyful little world made for laughter and easy magic.', location: 'Amusement Park', suggestedPlaces: ['Theme parks in Metro Manila', 'Outdoor leisure destinations', 'Weekend fun spots'] },
-  { id: 47, title: 'Claw Machine Date', category: 'play', description: 'Tiny wins, silly competition, and a fun little story to remember.', location: 'Arcade or Mall', suggestedPlaces: ['Arcade corners in malls', 'Entertainment zones', 'Mall prize game spots'] },
-  { id: 48, title: 'Arcade Competition', category: 'play', description: 'A little friendly challenge and a lot of laughter when the scores go wild.', location: 'Arcade', suggestedPlaces: ['Arcade spots in Makati', 'Game zones in malls', 'BGC entertainment spots'] },
-  { id: 49, title: 'Basketball Together', category: 'play', description: 'A quick burst of energy that turns into a good story and good company.', location: 'Court', suggestedPlaces: ['Local basketball courts', 'Outdoor parks', 'Community sports areas'] },
-  { id: 50, title: 'Badminton Together', category: 'play', description: 'A little movement, a few laughs, and a date with a rhythm all your own.', location: 'Badminton Court', suggestedPlaces: ['Community sports hubs', 'Sports venues in Metro Manila', 'Local parks / indoor courts'] },
-]
-
-function getInitialDateTickets(): DateTicket[] {
-  return dateTicketCatalog.map((ticket) => ({
-    ...ticket,
-    prep: ticket.prep ?? datePrepProfiles[ticket.id] ?? { environment: ['general'], essentials: ['water'], recommended: ['power_bank'], optional: [] },
-    prepChecklist: {},
-    status: 'unused',
-    favorite: false,
-  }))
-}
-
-function loadDateTickets() {
-  try {
-    const saved = localStorage.getItem('luna-date-tickets-v1')
-    if (!saved) return getInitialDateTickets()
-
-    const parsed = JSON.parse(saved) as DateTicket[]
-    const byId = new Map(parsed.map((ticket) => [ticket.id, ticket]))
-    return dateTicketCatalog.map((ticket) => ({
-      ...ticket,
-      prep: ticket.prep ?? byId.get(ticket.id)?.prep ?? datePrepProfiles[ticket.id] ?? { environment: ['general'], essentials: ['water'], recommended: ['power_bank'], optional: [] },
-      prepChecklist: byId.get(ticket.id)?.prepChecklist ?? {},
-      status: byId.get(ticket.id)?.status ?? 'unused',
-      favorite: byId.get(ticket.id)?.favorite ?? false,
-      date: byId.get(ticket.id)?.date,
-      time: byId.get(ticket.id)?.time,
-      meetingPlace: byId.get(ticket.id)?.meetingPlace,
-      note: byId.get(ticket.id)?.note,
-      completionDate: byId.get(ticket.id)?.completionDate,
-      redemptionDate: byId.get(ticket.id)?.redemptionDate,
-      memoryPhoto: byId.get(ticket.id)?.memoryPhoto,
-      memoryNote: byId.get(ticket.id)?.memoryNote,
-      favoriteMoment: byId.get(ticket.id)?.favoriteMoment,
-      rating: byId.get(ticket.id)?.rating,
-    }))
-  } catch {
-    return getInitialDateTickets()
-  }
-}
-
-function getDatePrepList(ticket: DateTicket | null, preferences: ComfortPreferences) {
-  const profile = ticket?.prep ?? datePrepProfiles[ticket?.id ?? 0] ?? { environment: ['general'], essentials: ['water'], recommended: ['power_bank'], optional: [] }
-  const essentialItems = Array.from(new Set(profile.essentials))
-  const recommendedItems = Array.from(new Set(profile.recommended))
-  const optionalItems = Array.from(new Set(profile.optional))
-  const extraRecommended: string[] = []
-
-  if (preferences.keepCool && profile.environment.some((value) => ['outdoor', 'walking', 'city', 'heritage', 'exploration', 'market', 'activity', 'physical_activity'].includes(value))) {
-    extraRecommended.push('portable_fan', 'water', 'umbrella', 'sunscreen', 'hat', 'cooling_towel')
-  }
-  if (preferences.preferShade && profile.environment.some((value) => ['outdoor', 'walking', 'city', 'heritage', 'exploration', 'market', 'activity'].includes(value))) {
-    extraRecommended.push('umbrella')
-  }
-  if (preferences.preferIndoor && profile.environment.some((value) => ['outdoor', 'walking', 'city', 'market', 'activity'].includes(value))) {
-    extraRecommended.push('indoor_alternative')
-  }
-  if (preferences.avoidExcessiveWalking && profile.environment.some((value) => ['walking', 'outdoor', 'city', 'exploration'].includes(value))) {
-    essentialItems.push('comfortable_shoes')
-  }
-  if (preferences.preferLessCrowded && ['food', 'market', 'city', 'exploration', 'outdoor'].some((value) => profile.environment.includes(value))) {
-    extraRecommended.push('tissues', 'hand_sanitizer', 'breath_mints', 'deodorant')
-  }
-
-  const uniqueEssential = Array.from(new Set([...essentialItems, ...(preferences.keepCool ? ['water', 'portable_fan'] : []), ...(['water', 'phone', 'wallet', 'power_bank'].filter((item) => item !== 'water' || essentialItems.includes('water')))]))
-  const uniqueRecommended = Array.from(new Set([...recommendedItems, ...extraRecommended]))
-  const uniqueOptional = Array.from(new Set(optionalItems))
-
-  const checklist = Array.from(new Set([
-    'phone',
-    'wallet',
-    'power_bank',
-    'water',
-    ...uniqueEssential,
-    ...uniqueRecommended,
-  ])).slice(0, 10)
-
-  const priorityLabels = ['essential', 'recommended', 'optional'] as const
-  return {
-    essentialItems: uniqueEssential.filter((item) => item in datePrepItemMeta),
-    recommendedItems: uniqueRecommended.filter((item) => item in datePrepItemMeta),
-    optionalItems: uniqueOptional.filter((item) => item in datePrepItemMeta),
-    checklistItems: checklist.filter((item) => item in datePrepItemMeta),
-    comfortNote: preferences.keepCool && profile.environment.some((value) => ['outdoor', 'walking', 'heritage', 'exploration', 'city'].includes(value))
-      ? 'This date may involve outdoor walking. Don\'t forget to keep cool, sip water, and take a little pause when the weather feels a bit much. ♡'
-      : preferences.preferIndoor && profile.environment.some((value) => ['outdoor', 'walking'].includes(value))
-        ? 'LUNA tip: a shaded stop or an indoor break can make the little adventure feel even softer and easier.'
-        : 'For this adventure, LUNA is keeping the plan practical, comfortable, and easy to enjoy.',
-    priorityLabels,
-  }
-}
 
 function NotificationStatus() {
   const [diagnostics, setDiagnostics] = useState(getNotificationDiagnostics)
@@ -585,8 +310,8 @@ function MedicationAlarm({ reminder, onDismiss, onTaken }: { reminder: Medicatio
     <div className="medication-alarm-backdrop" role="presentation">
       <section className="medication-alarm" role="dialog" aria-modal="true" aria-labelledby="medication-alarm-title">
         <div className="alarm-icon"><Pill size={22} /></div>
-        <p className="eyebrow">{reminder.kind === 'advance' ? 'LUNA ADVANCE REMINDER' : 'LUNA REMINDER'}</p>
-        <h2 id="medication-alarm-title">{reminder.kind === 'advance' ? 'Your medication is due in 10 minutes.' : 'It&apos;s time for your medication.'}</h2>
+        <p className="eyebrow">{reminder.kind === 'advance' ? 'GENTLE ADVANCE REMINDER' : 'MEDICATION TIME'}</p>
+        <h2 id="medication-alarm-title">{reminder.kind === 'advance' ? `${reminder.medicationName} in 10 minutes.` : `Time for ${reminder.medicationName}.`}</h2>
         <strong>{reminder.medicationName}</strong>
         <p className="alarm-time">Scheduled for {reminder.scheduledLabel}</p>
         <p className="alarm-note">Your browser notification may also appear when notifications are supported and permitted.</p>
@@ -1255,11 +980,48 @@ function Insight({ title, value, detail, loading }: { title: string; value: stri
 }
 
 function OurSpaceDashboard({ session, goHome, go }: { session: Session; goHome: () => void; go: (page: Page) => void }) {
-  const [partnerState] = useState<PartnerState>(() => {
-    const state = readPartnerState(session.user.id)
-    if (!state.partnerUserId) return state
-    return { ...state, messages: readThreadMessages(session.user.id, state.partnerUserId) }
+  const [partnerState, setPartnerState] = useState<PartnerState>({
+    status: 'not_connected',
+    myCode: '',
+    unreadCount: 0,
+    messages: [],
   })
+
+  useEffect(() => {
+    let active = true
+
+    const sync = async () => {
+      const myCode = (await ensureLunaCode()) ?? (await fetchOwnProfile(session.user.id))?.luna_code ?? 'LUNA-??????'
+      const activeConnection = await fetchActiveConnection(session.user.id)
+      if (!activeConnection) {
+        if (!active) return
+        setPartnerState((current) => ({ ...current, status: 'not_connected', myCode, partnerUserId: undefined, partnerName: undefined, partnerCode: undefined, connectedAt: undefined }))
+        return
+      }
+
+      const partnerId = activeConnection.user_a_id === session.user.id ? activeConnection.user_b_id : activeConnection.user_a_id
+      const partnerProfile = await fetchPartnerProfile(partnerId)
+      if (!active) return
+
+      setPartnerState({
+        status: 'connected',
+        myCode,
+        partnerUserId: partnerId,
+        partnerName: partnerProfile?.display_name ?? 'Your partner',
+        partnerCode: partnerProfile?.luna_code,
+        connectedAt: activeConnection.created_at,
+        unreadCount: 0,
+        messages: readThreadMessages(session.user.id, partnerId),
+      })
+    }
+
+    void sync()
+    const unsubscribe = subscribePartnerEvents(session.user.id, () => { void sync() })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [session.user.id])
 
   return (
     <Module title="Our Space" eyebrow="♡ A LITTLE SPACE FOR TWO" onHome={goHome}>
@@ -1318,49 +1080,93 @@ function OurSpaceDashboard({ session, goHome, go }: { session: Session; goHome: 
 }
 
 function MessagesPage({ session, goHome }: { session: Session; goHome: () => void }) {
-  const [partnerState, setPartnerState] = useState<PartnerState>(() => {
-    const state = readPartnerState(session.user.id)
-    if (!state.partnerUserId) return state
-    return { ...state, messages: readThreadMessages(session.user.id, state.partnerUserId) }
-  })
+  const [partnerState] = useState<PartnerState>(() => readPartnerState(session.user.id))
   const [messageDraft, setMessageDraft] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
+  const [messages, setMessages] = useState<PartnerMessage[]>([])
+
+  useEffect(() => {
+    let active = true
+
+    const sync = async () => {
+      if (!partnerState.partnerUserId) {
+        setMessages([])
+        return
+      }
+
+      try {
+        const rows = await fetchPartnerMessages(session.user.id, partnerState.partnerUserId)
+        if (!active) return
+        const mapped: PartnerMessage[] = rows.map((row) => ({
+          id: row.id,
+          senderId: row.sender_id === session.user.id ? 'me' : 'partner',
+          content: row.body,
+          createdAt: row.created_at,
+        }))
+        setMessages(mapped)
+      } catch (error) {
+        console.error('[LUNA Partner] Failed to load message thread:', error)
+      }
+    }
+
+    void sync()
+    const unsubscribe = subscribePartnerEvents(session.user.id, () => { void sync() })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [partnerState.partnerUserId, session.user.id])
 
   useEffect(() => {
     writePartnerState(session.user.id, partnerState)
     if (partnerState.partnerUserId) {
-      writeThreadMessages(session.user.id, partnerState.partnerUserId, partnerState.messages)
+      writeThreadMessages(session.user.id, partnerState.partnerUserId, messages)
     }
-  }, [partnerState, session.user.id])
+  }, [partnerState, messages, session.user.id])
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     const content = messageDraft.trim()
-    if (!content || partnerState.status !== 'connected') {
+    if (!content || partnerState.status !== 'connected' || !partnerState.partnerUserId) {
       setStatusMessage('Connection needed to send messages.')
       return
     }
 
-    const newMessage: PartnerMessage = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `msg-${Date.now()}`,
-      senderId: 'me',
-      content,
-      createdAt: new Date().toISOString(),
+    try {
+      const saved = await sendPartnerMessage(session.user.id, partnerState.partnerUserId, content)
+      if (saved) {
+        setMessages((current) => [...current, {
+          id: saved.id,
+          senderId: 'me',
+          content: saved.body,
+          createdAt: saved.created_at,
+        }])
+      }
+      setMessageDraft('')
+      setStatusMessage('Message sent ♡')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'LUNA could not send that message right now.')
+    }
+  }
+
+  const sendPartnerReminder = async () => {
+    if (partnerState.status !== 'connected') {
+      setStatusMessage('Activate your couple connection before sending a reminder.')
+      return
     }
 
-    setPartnerState((current) => ({
-      ...current,
-      unreadCount: 0,
-      messages: [...current.messages, newMessage],
-    }))
-    setMessageDraft('')
-    setStatusMessage('Message sent ♡')
+    try {
+      await showPartnerReminderNotification(partnerState.partnerName || 'Jam', 'LUNA is gently reminding you that your partner is waiting to talk.')
+      setStatusMessage('LUNA reminder sent ✓ Your partner will see a gentle check-in prompt in their device notifications.')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'LUNA could not send that reminder right now.')
+    }
   }
 
   return (
     <Module title="Messages" eyebrow="💌 PRIVATE CONVERSATION" onHome={goHome}>
       <div className="messages-page">
         <div className="chat-thread">
-          {partnerState.messages.map((message) => {
+          {messages.map((message) => {
             const isMine = message.senderId === 'me'
             return (
               <div key={message.id} className={isMine ? 'chat-bubble mine' : 'chat-bubble'}>
@@ -1373,7 +1179,10 @@ function MessagesPage({ session, goHome }: { session: Session; goHome: () => voi
 
         <div className="chat-composer">
           <textarea value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} placeholder="Send a quiet note to your partner..." rows={3} />
-          <button className="primary-button" type="button" onClick={sendMessage}>Send</button>
+          <div className="action-buttons">
+            <button className="primary-button" type="button" onClick={() => void sendMessage()}>Send</button>
+            <button className="secondary-button" type="button" onClick={() => void sendPartnerReminder()}>Send LUNA reminder</button>
+          </div>
         </div>
         {statusMessage && <p className="status-line">{statusMessage}</p>}
       </div>
@@ -1382,43 +1191,91 @@ function MessagesPage({ session, goHome }: { session: Session; goHome: () => voi
 }
 
 function DateVaultPage({ goHome }: { goHome: () => void }) {
-  const [tickets] = useState<DateTicket[]>(() => loadDateTickets())
-  const completedDates = tickets.filter((ticket) => ticket.status === 'completed')
-
   return (
     <Module title="Date Vault" eyebrow="🔐 OUR SHARED MEMORIES" onHome={goHome}>
       <div className="date-vault-page">
-        {completedDates.length === 0 ? (
-          <p className="module-empty">The vault is waiting for its first memory. Complete a date and add a photo to start building your shared story.</p>
-        ) : (
-          <div className="vault-stack">
-            {completedDates.map((ticket) => (
-              <div key={ticket.id} className="vault-item">
-                <span>🎟️ #{String(ticket.id).padStart(3, '0')}</span>
-                <div>
-                  <strong>{ticket.title}</strong>
-                  {ticket.rating && <span className="rating">★★★★★</span>}
-                </div>
-                <small>{ticket.completionDate ?? 'Completed'}</small>
-              </div>
-            ))}
-          </div>
-        )}
+        <p className="module-empty">The vault is waiting for its first memory. Complete a date and add a photo to start building your shared story.</p>
       </div>
     </Module>
   )
 }
 
 function CoupleSettings({ session, goHome }: { session: Session; goHome: () => void }) {
-  const [partnerState, setPartnerState] = useState<PartnerState>(() => readPartnerState(session.user.id))
+  const [partnerState, setPartnerState] = useState<PartnerState>({ status: 'not_connected', myCode: '', unreadCount: 0, messages: [] })
   const [requestCode, setRequestCode] = useState('')
   const [statusMessage, setStatusMessage] = useState('Your private connection stays off unless you choose to share a little space.')
 
   useEffect(() => {
-    writePartnerState(session.user.id, partnerState)
-  }, [partnerState, session.user.id])
+    let active = true
 
-  const submitConnectionRequest = () => {
+    const sync = async () => {
+      const myCode = (await ensureLunaCode()) ?? (await fetchOwnProfile(session.user.id))?.luna_code ?? ''
+      const activeConnection = await fetchActiveConnection(session.user.id)
+      const incoming = await fetchIncomingRequests(session.user.id)
+      const outgoing = await fetchLatestOutgoingRequest(session.user.id)
+
+      if (!active) return
+
+      if (activeConnection) {
+        const partnerId = activeConnection.user_a_id === session.user.id ? activeConnection.user_b_id : activeConnection.user_a_id
+        const partnerProfile = await fetchPartnerProfile(partnerId)
+        if (!active) return
+        setPartnerState({
+          status: 'connected',
+          myCode,
+          partnerUserId: partnerId,
+          partnerName: partnerProfile?.display_name ?? 'Your partner',
+          partnerCode: partnerProfile?.luna_code,
+          connectedAt: activeConnection.created_at,
+          unreadCount: incoming.length,
+          messages: readThreadMessages(session.user.id, partnerId),
+        })
+        return
+      }
+
+      if (incoming.length > 0) {
+        const senderId = incoming[0].sender_id
+        const senderProfile = await fetchPartnerProfile(senderId)
+        if (!active) return
+        setPartnerState({
+          status: 'request_received',
+          myCode,
+          partnerUserId: senderId,
+          partnerName: senderProfile?.display_name ?? 'A new partner request',
+          partnerCode: senderProfile?.luna_code,
+          unreadCount: incoming.length,
+          messages: readThreadMessages(session.user.id, senderId),
+        })
+        return
+      }
+
+      if (outgoing && outgoing.status === 'pending') {
+        const targetProfile = await fetchPartnerProfile(outgoing.receiver_id)
+        if (!active) return
+        setPartnerState({
+          status: 'request_sent',
+          myCode,
+          partnerUserId: outgoing.receiver_id,
+          partnerName: targetProfile?.display_name ?? 'Pending partner',
+          partnerCode: targetProfile?.luna_code,
+          unreadCount: 0,
+          messages: readThreadMessages(session.user.id, outgoing.receiver_id),
+        })
+        return
+      }
+
+      setPartnerState({ status: 'not_connected', myCode, unreadCount: 0, messages: [] })
+    }
+
+    void sync()
+    const unsubscribe = subscribePartnerEvents(session.user.id, () => { void sync() })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [session.user.id])
+
+  const submitConnectionRequest = async () => {
     const code = requestCode.trim().toUpperCase()
     if (!code) {
       setStatusMessage('Add a partner code to send a connection request.')
@@ -1429,24 +1286,44 @@ function CoupleSettings({ session, goHome }: { session: Session; goHome: () => v
       return
     }
 
-    setPartnerState((current) => ({
-      ...current,
-      status: 'request_sent',
-      partnerCode: code,
-      partnerName: 'Pending partner',
-      partnerUserId: 'partner-local',
-      unreadCount: 0,
-    }))
+    const partner = await lookupPartnerByCode(code)
+    if (!partner) {
+      setStatusMessage('LUNA could not find that code. Please check it and try again.')
+      return
+    }
+
+    const result = await sendPartnerRequest(session.user.id, partner.id)
+    if (!result.ok) {
+      setStatusMessage(result.message)
+      return
+    }
+
     setRequestCode('')
+    setPartnerState((current) => ({ ...current, status: 'request_sent', partnerUserId: partner.id, partnerName: partner.display_name || 'Pending partner', partnerCode: code, unreadCount: 0 }))
     setStatusMessage('Your request is waiting for acceptance. LUNA will keep the space private until they respond.')
   }
 
-  const acceptConnection = () => {
+  const acceptConnection = async () => {
+    const request = (await fetchIncomingRequests(session.user.id))[0]
+    if (!request) {
+      setStatusMessage('There is no incoming request to accept right now.')
+      return
+    }
+
+    const result = await acceptPartnerRequest(request.id)
+    if (!result.ok) {
+      setStatusMessage(result.message)
+      return
+    }
+
+    const partnerProfile = await fetchPartnerProfile(request.sender_id)
     setPartnerState((current) => ({
       ...current,
       status: 'connected',
-      partnerName: current.partnerName || 'Your partner',
-      connectedAt: new Date().toISOString().slice(0, 10),
+      partnerUserId: request.sender_id,
+      partnerName: partnerProfile?.display_name || 'Your partner',
+      partnerCode: partnerProfile?.luna_code,
+      connectedAt: new Date().toISOString(),
       unreadCount: 0,
       messages: current.messages.length > 0 ? current.messages : [
         { id: 'seed-1', senderId: 'partner', content: 'I saved a little surprise for us.', createdAt: new Date().toISOString() },
@@ -1455,16 +1332,46 @@ function CoupleSettings({ session, goHome }: { session: Session; goHome: () => v
     setStatusMessage('Connection accepted. Your shared space is now ready for quiet, intentional messages.')
   }
 
-  const declineConnection = () => {
-    setPartnerState((current) => ({
-      ...current,
-      status: 'declined',
-      partnerCode: undefined,
-      partnerName: undefined,
-      partnerUserId: undefined,
-      unreadCount: 0,
-    }))
+  const declineConnection = async () => {
+    const request = (await fetchIncomingRequests(session.user.id))[0]
+    if (!request) {
+      setStatusMessage('There is no incoming request to decline.')
+      return
+    }
+
+    const result = await declinePartnerRequest(request.id)
+    if (!result.ok) {
+      setStatusMessage(result.message)
+      return
+    }
+
+    setPartnerState((current) => ({ ...current, status: 'declined', partnerCode: undefined, partnerName: undefined, partnerUserId: undefined, unreadCount: 0 }))
     setStatusMessage('The request was declined. You can reconnect whenever you want, without changing the rest of your private LUNA space.')
+  }
+
+  const disconnectConnection = async () => {
+    const result = await disconnectPartnerConnection()
+    if (!result.ok) {
+      setStatusMessage(result.message)
+      return
+    }
+    setPartnerState((current) => ({ ...current, status: 'not_connected', partnerName: undefined, partnerCode: undefined, partnerUserId: undefined, unreadCount: 0 }))
+    setStatusMessage('Your shared connection has been disconnected.')
+  }
+
+  const cancelOutgoingRequest = async () => {
+    const outgoing = await fetchLatestOutgoingRequest(session.user.id)
+    if (!outgoing) {
+      setStatusMessage('There is no pending request to cancel.')
+      return
+    }
+    const result = await cancelPartnerRequest(outgoing.id)
+    if (!result.ok) {
+      setStatusMessage(result.message)
+      return
+    }
+    setPartnerState((current) => ({ ...current, status: 'not_connected', partnerName: undefined, partnerCode: undefined, partnerUserId: undefined, unreadCount: 0 }))
+    setStatusMessage('Your connection request was cancelled.')
   }
 
   return (
@@ -1502,7 +1409,11 @@ function CoupleSettings({ session, goHome }: { session: Session; goHome: () => v
           )}
 
           {partnerState.status === 'connected' && (
-            <button className="secondary-button" type="button" onClick={() => setPartnerState((current) => ({ ...current, status: 'not_connected', partnerName: undefined, partnerCode: undefined, partnerUserId: undefined, unreadCount: 0 }))}>Disconnect Partner</button>
+            <button className="secondary-button" type="button" onClick={disconnectConnection}>Disconnect Partner</button>
+          )}
+
+          {partnerState.status === 'request_sent' && (
+            <button className="secondary-button" type="button" onClick={cancelOutgoingRequest}>Cancel request</button>
           )}
 
           <p className="status-message">{statusMessage}</p>
@@ -1528,6 +1439,7 @@ function PersonalSettings({ session, onSignOut, goHome }: { session: Session; on
   const [message, setMessage] = useState('')
   const [partnerMode, setPartnerMode] = useState(false)
   const [dailyBriefEnabled, setDailyBriefEnabled] = useState(true)
+  const [notificationSettings, setNotificationState] = useState(() => getNotificationSettings())
 
   useEffect(() => {
     if (supabase) {
@@ -1539,6 +1451,11 @@ function PersonalSettings({ session, onSignOut, goHome }: { session: Session; on
         .then(({ data }) => setName(data?.display_name || ''))
     }
   }, [session])
+
+  function updateNotification(key: keyof typeof notificationSettings, value: boolean) {
+    const next = setNotificationSettings({ [key]: value })
+    setNotificationState(next)
+  }
 
   async function save(event: FormEvent) {
     event.preventDefault()
@@ -1592,6 +1509,49 @@ function PersonalSettings({ session, onSignOut, goHome }: { session: Session; on
             ))}
           </ul>
         </section>
+
+        <section className="module-card settings-card">
+          <h2>Notifications</h2>
+          <div className="toggle-block">
+            <div>
+              <strong>Medication reminders</strong>
+              <small>Browser alerts for scheduled medication checks and due reminders.</small>
+            </div>
+            <button className={`toggle ${notificationSettings.medication ? 'on' : ''}`} onClick={() => updateNotification('medication', !notificationSettings.medication)} aria-label="Toggle medication reminders">
+              <span />
+            </button>
+          </div>
+
+          <div className="toggle-block">
+            <div>
+              <strong>Couple reminders</strong>
+              <small>LUNA-generated nudges for partner check-ins are sent only when the connection is active.</small>
+            </div>
+            <button className={`toggle ${notificationSettings.couple ? 'on' : ''}`} onClick={() => updateNotification('couple', !notificationSettings.couple)} aria-label="Toggle couple reminders">
+              <span />
+            </button>
+          </div>
+
+          <div className="toggle-block">
+            <div>
+              <strong>Daily affirmations</strong>
+              <small>Gentle encouragement for your morning, afternoon, or evening routine.</small>
+            </div>
+            <button className={`toggle ${notificationSettings.affirmation ? 'on' : ''}`} onClick={() => updateNotification('affirmation', !notificationSettings.affirmation)} aria-label="Toggle affirmation reminders">
+              <span />
+            </button>
+          </div>
+
+          <div className="toggle-block">
+            <div>
+              <strong>Quiet hours</strong>
+              <small>Pause reminders between {notificationSettings.quietStart} and {notificationSettings.quietEnd}.</small>
+            </div>
+            <button className={`toggle ${notificationSettings.quietHours ? 'on' : ''}`} onClick={() => updateNotification('quietHours', !notificationSettings.quietHours)} aria-label="Toggle quiet hours">
+              <span />
+            </button>
+          </div>
+        </section>
       </div>
     </Module>
   )
@@ -1617,666 +1577,149 @@ function Module({ title, eyebrow, children, onHome }: { title: string; eyebrow: 
   )
 }
 
-function DateTicketsPage({ goHome }: { goHome: () => void }) {
-  const [tickets, setTickets] = useState<DateTicket[]>(() => loadDateTickets())
-  const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
-  const [revealTicketId, setRevealTicketId] = useState<number | null>(null)
-  const [revealStage, setRevealStage] = useState<'loading' | 'flip' | 'done'>('loading')
-  const [revealPrompt, setRevealPrompt] = useState<{ ticketId: number; step: 1 | 2 | 3 } | null>(null)
-  const [redeemTicketId, setRedeemTicketId] = useState<number | null>(null)
-  const [scheduleDraft, setScheduleDraft] = useState({ date: '', time: '', meetingPlace: '', note: '' })
-  const [memoryDraft, setMemoryDraft] = useState({ photo: '', memoryNote: '', favoriteMoment: '', rating: 5 })
-  const [comfortPreferences, setComfortPreferences] = useState<ComfortPreferences>(() => loadComfortPreferences())
+function DateTicketsPage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [connection, setConnection] = useState<{ connectionId: string; partnerId: string; partnerName: string } | null>(null)
+  const [tickets, setTickets] = useState<Array<{ id: string; title: string; planned_on: string; location: string | null; notes: string | null; status: string }>>([])
+  const [form, setForm] = useState({ title: '', planned_on: today(), location: '', notes: '', status: 'planned' as 'planned' | 'suggested' | 'completed' })
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
-    localStorage.setItem('luna-date-tickets-v1', JSON.stringify(tickets))
-  }, [tickets])
+    let active = true
 
-  useEffect(() => {
-    localStorage.setItem('luna-date-comfort-preferences-v1', JSON.stringify(comfortPreferences))
-  }, [comfortPreferences])
+    const sync = async () => {
+      const activeConnection = await fetchActiveConnection(session.user.id)
+      if (!activeConnection) {
+        if (!active) return
+        setConnection(null)
+        setTickets([])
+        return
+      }
 
-  const selectedTicket = tickets.find((ticket) => ticket.id === selectedTicketId) ?? null
-  const revealTicket = tickets.find((ticket) => ticket.id === revealTicketId) ?? null
-  const activeSurprise = useMemo(
-    () => tickets.find((ticket) => ticket.status === 'revealed' || ticket.status === 'redeemed' || ticket.status === 'scheduled') ?? null,
-    [tickets],
-  )
-  const selectedDatePrep = useMemo(() => getDatePrepList(selectedTicket, comfortPreferences), [selectedTicket, comfortPreferences])
-  const canRevealAnotherTicket = !activeSurprise || activeSurprise.status === 'completed'
+      const partnerId = activeConnection.user_a_id === session.user.id ? activeConnection.user_b_id : activeConnection.user_a_id
+      const partnerProfile = await fetchPartnerProfile(partnerId)
+      if (!active) return
 
-  const stats = useMemo(() => {
-    const secret = tickets.filter((ticket) => ticket.status === 'unused').length
-    const revealed = tickets.filter((ticket) => ticket.status === 'revealed').length
-    const scheduled = tickets.filter((ticket) => ticket.status === 'scheduled').length
-    const completed = tickets.filter((ticket) => ticket.status === 'completed').length
-    const total = tickets.length
-    return { total, secret, revealed, scheduled, completed }
-  }, [tickets])
+      setConnection({
+        connectionId: activeConnection.id,
+        partnerId,
+        partnerName: partnerProfile?.display_name || 'Your partner',
+      })
 
-  const updateTicket = (id: number, updater: (ticket: DateTicket) => DateTicket) => {
-    setTickets((current) => current.map((ticket) => ticket.id === id ? updater(ticket) : ticket))
-  }
+      const nextTickets = await fetchDateTicketsForConnection(activeConnection.id)
+      if (!active) return
+      setTickets(nextTickets.map((ticket) => ({
+        id: ticket.id,
+        title: ticket.title,
+        planned_on: ticket.planned_on,
+        location: ticket.location,
+        notes: ticket.notes,
+        status: ticket.status,
+      })))
+    }
 
-  const openTicket = (id: number) => {
-    const ticket = tickets.find((entry) => entry.id === id)
-    if (!ticket) return
-    setSelectedTicketId(id)
-    setScheduleDraft({
-      date: ticket.date ?? '',
-      time: ticket.time ?? '',
-      meetingPlace: ticket.meetingPlace ?? '',
-      note: ticket.note ?? '',
-    })
-    setMemoryDraft({
-      photo: ticket.memoryPhoto ?? '',
-      memoryNote: ticket.memoryNote ?? '',
-      favoriteMoment: ticket.favoriteMoment ?? '',
-      rating: ticket.rating ?? 5,
-    })
-  }
+    void sync()
+    return () => {
+      active = false
+    }
+  }, [session.user.id])
 
-  const revealOneTicket = (id: number) => {
-    const ticket = tickets.find((entry) => entry.id === id)
-    if (!ticket || ticket.status !== 'unused') return
-
-    setRevealTicketId(id)
-    setRevealStage('loading')
-
-    window.setTimeout(() => setRevealStage('flip'), 600)
-    window.setTimeout(() => {
-      updateTicket(id, (entry) => ({
-        ...entry,
-        status: 'revealed',
-        revealedAt: entry.revealedAt ?? today(),
-      }))
-      setRevealStage('done')
-      setSelectedTicketId(id)
-    }, 1500)
-  }
-
-  const beginRevealFlow = (ticketId: number) => {
-    const ticket = tickets.find((entry) => entry.id === ticketId)
-    if (!ticket || ticket.status !== 'unused') return
-    if (!canRevealAnotherTicket) {
-      if (activeSurprise) setSelectedTicketId(activeSurprise.id)
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    if (!connection || !form.title.trim()) {
+      setNotice('Choose a connected partner and add a date idea first.')
       return
     }
-    setRevealPrompt({ ticketId, step: 1 })
-  }
 
-  const cancelRevealFlow = () => setRevealPrompt(null)
+    setBusy(true)
+    setNotice('')
 
-  const continueRevealFlow = () => {
-    if (!revealPrompt) return
-    if (revealPrompt.step === 1) {
-      setRevealPrompt({ ticketId: revealPrompt.ticketId, step: 2 })
-      return
+    try {
+      const saved = await createDateTicket(connection.connectionId, session.user.id, {
+        title: form.title,
+        planned_on: form.planned_on,
+        location: form.location,
+        notes: form.notes,
+        status: form.status,
+      })
+
+      if (!saved) {
+        setNotice('LUNA could not save this date idea right now.')
+        return
+      }
+
+      setTickets((current) => [...current, {
+        id: saved.id,
+        title: saved.title,
+        planned_on: saved.planned_on,
+        location: saved.location,
+        notes: saved.notes,
+        status: saved.status,
+      }].sort((a, b) => new Date(a.planned_on).getTime() - new Date(b.planned_on).getTime()))
+      setForm({ title: '', planned_on: today(), location: '', notes: '', status: 'planned' })
+      setNotice('Date idea saved to your shared space ✓')
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'LUNA could not save that date right now.')
+    } finally {
+      setBusy(false)
     }
-    if (revealPrompt.step === 2) {
-      setRevealPrompt({ ticketId: revealPrompt.ticketId, step: 3 })
-      return
-    }
-    if (revealPrompt.step === 3) {
-      setRevealPrompt(null)
-      revealOneTicket(revealPrompt.ticketId)
-    }
   }
-
-  const pickRandomDate = () => {
-    if (!canRevealAnotherTicket) {
-      if (activeSurprise) setSelectedTicketId(activeSurprise.id)
-      return
-    }
-    const pool = tickets.filter((ticket) => ticket.status === 'unused')
-    if (pool.length === 0) return
-    const next = pool[Math.floor(Math.random() * pool.length)]
-    beginRevealFlow(next.id)
-  }
-
-  const saveSchedule = () => {
-    if (!selectedTicketId) return
-    updateTicket(selectedTicketId, (ticket) => ({
-      ...ticket,
-      status: scheduleDraft.date || scheduleDraft.time || scheduleDraft.meetingPlace || scheduleDraft.note ? 'scheduled' : ticket.status,
-      date: scheduleDraft.date || ticket.date,
-      time: scheduleDraft.time || ticket.time,
-      meetingPlace: scheduleDraft.meetingPlace || ticket.meetingPlace,
-      note: scheduleDraft.note || ticket.note,
-    }))
-  }
-
-  const saveMemory = () => {
-    if (!selectedTicketId) return
-    updateTicket(selectedTicketId, (ticket) => ({
-      ...ticket,
-      memoryPhoto: memoryDraft.photo || ticket.memoryPhoto,
-      memoryNote: memoryDraft.memoryNote || ticket.memoryNote,
-      favoriteMoment: memoryDraft.favoriteMoment || ticket.favoriteMoment,
-      rating: memoryDraft.rating || ticket.rating || 5,
-    }))
-  }
-
-  const togglePrepItem = (item: string) => {
-    if (!selectedTicketId) return
-    updateTicket(selectedTicketId, (ticket) => ({
-      ...ticket,
-      prepChecklist: {
-        ...(ticket.prepChecklist ?? {}),
-        [item]: !(ticket.prepChecklist?.[item] ?? false),
-      },
-    }))
-  }
-
-  const markCompleted = () => {
-    if (!selectedTicketId) return
-    updateTicket(selectedTicketId, (ticket) => ({
-      ...ticket,
-      status: 'completed',
-      completionDate: ticket.completionDate || today(),
-      date: ticket.date || today(),
-    }))
-  }
-
-  const redeemTicket = () => {
-    if (!selectedTicketId) return
-    updateTicket(selectedTicketId, (ticket) => ({
-      ...ticket,
-      status: 'redeemed',
-      redemptionDate: ticket.redemptionDate || today(),
-    }))
-    setRedeemTicketId(null)
-  }
-
-  const upcomingDates = tickets.filter((ticket) => ticket.status === 'scheduled' || ticket.status === 'revealed')
-  const completedDates = tickets.filter((ticket) => ticket.status === 'completed')
 
   return (
-    <section className="date-tickets-page">
-      {activeSurprise && activeSurprise.status !== 'completed' && (
-        <div className="current-adventure card-surface">
-          <p className="eyebrow">🌙 YOUR CURRENT ADVENTURE</p>
-          <h2>One little surprise is enough for now.</h2>
-          <p>You have a secret waiting for its day. Enjoy this one first. ♡</p>
-          <button className="primary-button" type="button" onClick={() => setSelectedTicketId(activeSurprise.id)}>🎟️ View my date</button>
-        </div>
-      )}
-
-      <div className="date-tickets-hero card-surface">
-        <div className="date-hero-mark">🌙</div>
-        <p className="eyebrow">YOUR LITTLE ADVENTURES</p>
-        <h1>50 surprises are waiting for you.</h1>
-        <p className="date-hero-copy">You don't get to choose the date. LUNA does.</p>
-        <div className="date-hero-actions">
-          {canRevealAnotherTicket ? (
-            <button className="primary-button" type="button" onClick={() => {
-              const pool = tickets.filter((ticket) => ticket.status === 'unused')
-              const next = pool[Math.floor(Math.random() * pool.length)]
-              if (next) beginRevealFlow(next.id)
-            }}>✨ Reveal my date</button>
-          ) : (
-            <button className="primary-button" type="button" onClick={() => setSelectedTicketId(activeSurprise?.id ?? null)} disabled={!activeSurprise}>🎟️ View current surprise</button>
-          )}
-          <button className="secondary-button" type="button" onClick={pickRandomDate} disabled={!canRevealAnotherTicket}>🎲 Let LUNA choose</button>
-        </div>
-      </div>
-
-      <div className="date-secret-stats">
-        <div className="stat-glass"><span>🎟️</span><strong>{stats.total}</strong><small>Total surprises</small></div>
-        <div className="stat-glass"><span>🔒</span><strong>{stats.secret}</strong><small>Still secret</small></div>
-        <div className="stat-glass"><span>✨</span><strong>{stats.revealed}</strong><small>Revealed</small></div>
-        <div className="stat-glass"><span>🌸</span><strong>{stats.completed}</strong><small>Lived</small></div>
-      </div>
-
-      <div className="comfort-panel card-surface">
-        <div className="mystery-heading compact">
-          <p className="eyebrow">🌬️ COMFORT PREFERENCES</p>
-          <h2>LUNA keeps the little details gentle.</h2>
-        </div>
-        <div className="comfort-grid">
-          {[
-            { key: 'keepCool', label: 'Keep me cool', icon: '🌬️' },
-            { key: 'preferShade', label: 'Prefer shade when possible', icon: '☂️' },
-            { key: 'preferIndoor', label: 'Prefer indoor alternatives', icon: '🏠' },
-            { key: 'avoidExcessiveWalking', label: 'Avoid excessive walking', icon: '🚶' },
-            { key: 'preferLessCrowded', label: 'Prefer less crowded places', icon: '👥' },
-          ].map(({ key, label, icon }) => (
-            <label key={key} className="comfort-toggle">
-              <input
-                type="checkbox"
-                checked={comfortPreferences[key as keyof ComfortPreferences]}
-                onChange={(event) => setComfortPreferences((current) => ({ ...current, [key]: event.target.checked }))}
-              />
-              <span>{icon}</span>
-              <strong>{label}</strong>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div className="make-it-mystery card-surface">
-        <div className="mystery-heading">
-          <p className="eyebrow">SECRET DATE COLLECTION</p>
-          <h2>One little surprise at a time.</h2>
-        </div>
-        <div className="mystery-grid">
-          {tickets.map((ticket) => {
-            const isSecret = ticket.status === 'unused'
-            const accent = ['🌙', '🌸', '✦', '♡', '🎟️', '🔐', '✨'][ticket.id % 7]
-
-            return (
-              <button
-                key={ticket.id}
-                type="button"
-                className={isSecret ? 'mystery-ticket is-secret' : 'mystery-ticket is-open'}
-                onClick={() => {
-                  if (isSecret) {
-                    beginRevealFlow(ticket.id)
-                    return
-                  }
-                  openTicket(ticket.id)
-                }}
-              >
-                <div className="mystery-ticket-inner">
-                  <div className="mystery-header">
-                    <span>LUNA</span>
-                    {ticket.favorite ? <span className="tiny-heart">♥</span> : <span className="tiny-dot">•</span>}
-                  </div>
-                  <div className="mystery-serial">#{String(ticket.id).padStart(3, '0')}</div>
-                  <div className="mystery-symbol">{accent}</div>
-                  {isSecret ? (
-                    <>
-                      <strong>SECRET DATE PASS</strong>
-                      <small>Your adventure is hidden</small>
-                      <span className="mystery-lock">🔒</span>
-                    </>
-                  ) : (
-                    <>
-                      <strong>{ticket.title}</strong>
-                      <small>{ticket.status === 'scheduled' ? 'Scheduled' : ticket.status === 'completed' ? 'Completed' : 'Revealed'}</small>
-                    </>
-                  )}
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      <div className="date-collector-row">
-        <div className="date-upcoming card-surface">
-          <div className="mystery-heading compact">
-            <p className="eyebrow">📅 UPCOMING</p>
-            <h2>Plans in motion</h2>
-          </div>
-          {upcomingDates.length === 0 ? (
-            <p className="module-empty">No adventures are scheduled yet. LUNA is still keeping it a surprise.</p>
-          ) : (
-            <div className="vault-stack">
-              {upcomingDates.map((ticket) => (
-                <button key={ticket.id} type="button" className="vault-item" onClick={() => openTicket(ticket.id)}>
-                  <span>🎟️ #{String(ticket.id).padStart(3, '0')}</span>
-                  <strong>{ticket.title}</strong>
-                  <small>{ticket.status === 'scheduled' ? `${ticket.date ?? 'Soon'} · ${ticket.time ?? 'Flexible'}` : 'Revealed and ready'}</small>
+    <Module title="Date Tickets" eyebrow="🎟️ OUR SHARED ADVENTURES" onHome={goHome}>
+      <div className="date-tickets-page">
+        {!connection ? (
+          <p className="module-empty">Connect with your partner to start planning shared adventures together.</p>
+        ) : (
+          <div className="module-grid">
+            <section className="module-card">
+              <h2>Plan a date</h2>
+              <form className="module-form" onSubmit={submit}>
+                <Field label="Date idea" required value={form.title} onChange={(value) => setForm((current) => ({ ...current, title: value }))} />
+                <Field label="Planned on" type="date" required value={form.planned_on} onChange={(value) => setForm((current) => ({ ...current, planned_on: value }))} />
+                <Field label="Location or vibe" value={form.location} onChange={(value) => setForm((current) => ({ ...current, location: value }))} />
+                <label className="module-field">
+                  Notes
+                  <textarea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="A little plan, a cozy idea, or a surprise to keep in mind..." />
+                </label>
+                <label className="module-field">
+                  Status
+                  <select value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as 'planned' | 'suggested' | 'completed' }))}>
+                    <option value="planned">Planned</option>
+                    <option value="suggested">Suggested</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </label>
+                <button className="primary-button" type="submit" disabled={busy}>
+                  {busy ? 'Saving...' : 'Save date idea'}
                 </button>
-              ))}
-            </div>
-          )}
-        </div>
+              </form>
+              {notice && <p className="status-line">{notice}</p>}
+            </section>
 
-        <div className="date-vault card-surface">
-          <div className="mystery-heading compact">
-            <p className="eyebrow">🔐 DATE VAULT</p>
-            <h2>The adventures we’ve already lived</h2>
-          </div>
-          {completedDates.length === 0 ? (
-            <p className="module-empty">The vault is waiting for its first memory.</p>
-          ) : (
-            <div className="vault-stack">
-              {completedDates.map((ticket) => (
-                <button key={ticket.id} type="button" className="vault-item" onClick={() => openTicket(ticket.id)}>
-                  <span>🎟️ #{String(ticket.id).padStart(3, '0')}</span>
-                  <strong>{ticket.title}</strong>
-                  <small>{ticket.completionDate ?? 'Completed'}</small>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="date-generator card-surface">
-        <div className="mystery-heading compact">
-          <p className="eyebrow">✨ LET LUNA BUILD THE SURPRISE</p>
-          <h2>Choose how much control you want.</h2>
-        </div>
-        <div className="generator-grid">
-          <label>
-            <span>Energy</span>
-            <select defaultValue="surprise">
-              <option value="surprise">🌙 Completely random</option>
-              <option value="cozy">🌸 Cozy</option>
-              <option value="playful">🎮 Playful</option>
-              <option value="adventurous">🌆 Adventurous</option>
-              <option value="creative">🎨 Creative</option>
-            </select>
-          </label>
-          <label>
-            <span>Time</span>
-            <select defaultValue="anytime">
-              <option value="anytime">Any time</option>
-              <option value="morning">Morning</option>
-              <option value="afternoon">Afternoon</option>
-              <option value="evening">Evening</option>
-            </select>
-          </label>
-        </div>
-        <button className="primary-button" type="button" onClick={pickRandomDate}>🎟️ Blind date</button>
-      </div>
-
-      {revealPrompt && (
-        <div className="ticket-modal-backdrop" role="presentation" onClick={cancelRevealFlow}>
-          <div className="reveal-confirmation" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <div className="reveal-confirmation-body">
-              <div className="reveal-crest">🌙</div>
-              {revealPrompt.step === 1 && (
-                <>
-                  <p className="eyebrow">WAIT...</p>
-                  <h3>There are still many little adventures waiting for you.</h3>
-                  <p>Once you open this one, the surprise is gone. Do you really want to know what LUNA picked?</p>
-                  <div className="modal-actions stacked">
-                    <button className="primary-button" type="button" onClick={continueRevealFlow}>YES, I'M SURE</button>
-                    <button className="secondary-button" type="button" onClick={cancelRevealFlow}>LET ME WAIT ♡</button>
-                    <button className="text-button subtle" type="button" onClick={cancelRevealFlow}>💌 LET SOMEONE ELSE PICK</button>
-                  </div>
-                </>
-              )}
-              {revealPrompt.step === 2 && (
-                <>
-                  <p className="eyebrow">♡ ONE MORE THING...</p>
-                  <h3>You don't have to open it right now.</h3>
-                  <p>You could let this little secret linger a little longer. Are you really sure?</p>
-                  <div className="modal-actions stacked">
-                    <button className="primary-button" type="button" onClick={continueRevealFlow}>I'M REALLY SURE</button>
-                    <button className="secondary-button" type="button" onClick={cancelRevealFlow}>I'LL WAIT ♡</button>
-                  </div>
-                </>
-              )}
-              {revealPrompt.step === 3 && (
-                <>
-                  <p className="eyebrow">🎟️ LAST CHANCE</p>
-                  <h3>This little surprise can only be a surprise once.</h3>
-                  <p>Take your time. Do you still want to reveal it?</p>
-                  <div className="modal-actions stacked">
-                    <button className="primary-button" type="button" onClick={continueRevealFlow}>OPEN MY SURPRISE ✨</button>
-                    <button className="secondary-button" type="button" onClick={cancelRevealFlow}>NOT YET</button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {revealTicket && (
-        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setRevealTicketId(null)}>
-          <div className="reveal-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <div className={`reveal-stage ${revealStage}`}>
-              {revealStage === 'loading' && (
-                <>
-                  <p className="eyebrow">🌙 LUNA IS FINDING YOUR ADVENTURE...</p>
-                  <div className="pulse-orbit">✦</div>
-                  <p className="reveal-loading">Searching the secret collection...</p>
-                </>
-              )}
-              {revealStage === 'flip' && (
-                <>
-                  <p className="eyebrow">🎟️</p>
-                  <div className="mystery-reveal-card">
-                    <span className="reveal-luna">LUNA</span>
-                    <strong>#{String(revealTicket.id).padStart(3, '0')}</strong>
-                    <div className="reveal-spark">✦</div>
-                    <small>SECRET DATE PASS</small>
-                  </div>
-                  <p className="reveal-loading">Your surprise is almost here...</p>
-                </>
-              )}
-              {revealStage === 'done' && (
-                <>
-                  <p className="eyebrow">✨ YOUR DATE HAS BEEN CHOSEN</p>
-                  <div className="reveal-card-hit">
-                    <span className="reveal-badge">#{String(revealTicket.id).padStart(3, '0')}</span>
-                    <h3>{revealTicket.title}</h3>
-                    <div className="reveal-category">{dateTicketCategoryMeta[revealTicket.category].icon} {dateTicketCategoryMeta[revealTicket.category].label}</div>
-                    <p>{revealTicket.description}</p>
-                  </div>
-                  <div className="modal-actions">
-                    <button className="primary-button" type="button" onClick={() => { setRevealTicketId(null); setSelectedTicketId(revealTicket.id); }}>Schedule date</button>
-                    <button className="secondary-button" type="button" onClick={() => { setRevealTicketId(null); setSelectedTicketId(revealTicket.id); }}>Keep for later</button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedTicket && (
-        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setSelectedTicketId(null)}>
-          <div className="ticket-modal" role="dialog" aria-modal="true" aria-labelledby="date-ticket-title" onClick={(event) => event.stopPropagation()}>
-            <button type="button" className="modal-close" aria-label="Close date ticket" onClick={() => setSelectedTicketId(null)}>×</button>
-            <div className="ticket-modal-header">
-              <p className="eyebrow">🌙 LUNA</p>
-              <span className="ticket-modal-number">#{String(selectedTicket.id).padStart(3, '0')}</span>
-            </div>
-            <h3 id="date-ticket-title">{selectedTicket.title}</h3>
-            <div className="ticket-modal-category">
-              <span>{dateTicketCategoryMeta[selectedTicket.category].icon}</span>
-              <strong>{dateTicketCategoryMeta[selectedTicket.category].label}</strong>
-            </div>
-            <p className="ticket-modal-copy">{selectedTicket.description}</p>
-            <div className="ticket-detail-grid">
-              <div><span>Location</span><strong>{selectedTicket.location}</strong></div>
-              <div><span>Status</span><strong>{selectedTicket.status.toUpperCase()}</strong></div>
-              <div><span>Date</span><strong>{selectedTicket.date ?? 'Not scheduled yet'}</strong></div>
-              <div><span>Time</span><strong>{selectedTicket.time ?? 'Flexible'}</strong></div>
-            </div>
-            <div className="suggested-places">
-              <h4>Suggested places</h4>
-              <ul>
-                {selectedTicket.suggestedPlaces.map((place) => (
-                  <li key={place}>{place}</li>
-                ))}
-              </ul>
-            </div>
-
-            {selectedTicket.status !== 'unused' && selectedDatePrep && (
-              <div className="date-prep-panel">
-                <div className="date-prep-header">
-                  <p className="eyebrow">🎒 DATE PREP</p>
-                  <h4>Everything we might want for our little adventure. ♡</h4>
-                </div>
-                <p className="date-prep-note">{selectedDatePrep.comfortNote}</p>
-
-                <div className="prep-groups">
-                  {selectedDatePrep.essentialItems.length > 0 && (
-                    <div className="prep-group">
-                      <span className="prep-group-label">ESSENTIAL</span>
-                      <div className="prep-items">
-                        {selectedDatePrep.essentialItems.map((item) => {
-                          const meta = datePrepItemMeta[item]
-                          return (
-                            <div key={item} className="prep-item essential">
-                              <span>{meta.icon}</span>
-                              <strong>{meta.label}</strong>
-                            </div>
-                          )
-                        })}
+            <section className="module-card">
+              <h2>Shared date list</h2>
+              {tickets.length === 0 ? (
+                <p className="module-empty">No shared plans yet. Add your first LUNA date idea above.</p>
+              ) : (
+                <div className="record-list">
+                  {tickets.map((ticket) => (
+                    <div className="record" key={ticket.id}>
+                      <div>
+                        <strong>{ticket.title}</strong>
+                        <small>{ticket.planned_on} · {ticket.status}</small>
+                        {ticket.location && <p>{ticket.location}</p>}
+                        {ticket.notes && <p>{ticket.notes}</p>}
                       </div>
                     </div>
-                  )}
-
-                  {selectedDatePrep.recommendedItems.length > 0 && (
-                    <div className="prep-group">
-                      <span className="prep-group-label">RECOMMENDED</span>
-                      <div className="prep-items">
-                        {selectedDatePrep.recommendedItems.map((item) => {
-                          const meta = datePrepItemMeta[item]
-                          return (
-                            <div key={item} className="prep-item recommended">
-                              <span>{meta.icon}</span>
-                              <strong>{meta.label}</strong>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedDatePrep.optionalItems.length > 0 && (
-                    <div className="prep-group">
-                      <span className="prep-group-label">OPTIONAL</span>
-                      <div className="prep-items">
-                        {selectedDatePrep.optionalItems.map((item) => {
-                          const meta = datePrepItemMeta[item]
-                          return (
-                            <div key={item} className="prep-item optional">
-                              <span>{meta.icon}</span>
-                              <strong>{meta.label}</strong>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
+                  ))}
                 </div>
-
-                <div className="prep-checklist">
-                  <div className="prep-checklist-header">♡ BEFORE WE GO</div>
-                  <div className="prep-checklist-grid">
-                    {selectedDatePrep.checklistItems.map((item) => {
-                      const checked = !!selectedTicket.prepChecklist?.[item]
-                      const meta = datePrepItemMeta[item]
-                      return (
-                        <button
-                          key={item}
-                          type="button"
-                          className={checked ? 'prep-check-item checked' : 'prep-check-item'}
-                          onClick={() => togglePrepItem(item)}
-                          aria-pressed={checked}
-                        >
-                          <span className="checkmark">{checked ? '☑' : '☐'}</span>
-                          <span>{meta.icon}</span>
-                          <strong>{meta.label}</strong>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {selectedDatePrep.checklistItems.length > 0 && selectedDatePrep.checklistItems.every((item) => !!selectedTicket.prepChecklist?.[item]) && (
-                  <div className="ready-panel" aria-live="polite">
-                    <div className="ready-badge">✨ WE'RE READY</div>
-                    <p>Everything's packed. Now we just need the adventure. ♡</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedTicket.status !== 'completed' && (
-              <div className="schedule-panel">
-                <h4>Date details</h4>
-                <div className="schedule-grid">
-                  <label>
-                    Date
-                    <input type="date" value={scheduleDraft.date} onChange={(event) => setScheduleDraft((current) => ({ ...current, date: event.target.value }))} />
-                  </label>
-                  <label>
-                    Time
-                    <input type="time" value={scheduleDraft.time} onChange={(event) => setScheduleDraft((current) => ({ ...current, time: event.target.value }))} />
-                  </label>
-                  <label className="full-width">
-                    Meeting place
-                    <input value={scheduleDraft.meetingPlace} onChange={(event) => setScheduleDraft((current) => ({ ...current, meetingPlace: event.target.value }))} placeholder="Optional meeting place" />
-                  </label>
-                  <label className="full-width">
-                    Note
-                    <textarea value={scheduleDraft.note} onChange={(event) => setScheduleDraft((current) => ({ ...current, note: event.target.value }))} placeholder="Can't wait for this one ♡" />
-                  </label>
-                </div>
-                <div className="modal-actions">
-                  {selectedTicket.status === 'revealed' && (
-                    <button className="primary-button" type="button" onClick={saveSchedule}>Schedule this date</button>
-                  )}
-                  {selectedTicket.status === 'unused' && (
-                    <button className="primary-button" type="button" onClick={() => setRedeemTicketId(selectedTicket.id)}>Redeem ticket</button>
-                  )}
-                  {selectedTicket.status === 'redeemed' || selectedTicket.status === 'scheduled' ? (
-                    <button className="primary-button" type="button" onClick={saveSchedule}>Save date</button>
-                  ) : null}
-                  {selectedTicket.status !== 'unused' && (
-                    <button className="secondary-button" type="button" onClick={markCompleted}>Mark completed</button>
-                  )}
-                  <button className="secondary-button" type="button" onClick={() => setSelectedTicketId(null)}>Close</button>
-                </div>
-              </div>
-            )}
-
-            {selectedTicket.status === 'completed' && (
-              <div className="memory-panel">
-                <h4>Our date</h4>
-                <div className="schedule-grid">
-                  <label className="full-width">
-                    Photo URL
-                    <input value={memoryDraft.photo} onChange={(event) => setMemoryDraft((current) => ({ ...current, photo: event.target.value }))} placeholder="https://..." />
-                  </label>
-                  <label className="full-width">
-                    Favorite moment
-                    <textarea value={memoryDraft.favoriteMoment} onChange={(event) => setMemoryDraft((current) => ({ ...current, favoriteMoment: event.target.value }))} placeholder="Write something..." />
-                  </label>
-                  <label className="full-width">
-                    Memory note
-                    <textarea value={memoryDraft.memoryNote} onChange={(event) => setMemoryDraft((current) => ({ ...current, memoryNote: event.target.value }))} placeholder="How it felt, what made you smile..." />
-                  </label>
-                  <label>
-                    Rating
-                    <select value={memoryDraft.rating} onChange={(event) => setMemoryDraft((current) => ({ ...current, rating: Number(event.target.value) }))}>
-                      <option value={5}>★★★★★</option>
-                      <option value={4}>★★★★☆</option>
-                      <option value={3}>★★★☆☆</option>
-                      <option value={2}>★★☆☆☆</option>
-                      <option value={1}>★☆☆☆☆</option>
-                    </select>
-                  </label>
-                </div>
-                <div className="modal-actions">
-                  <button className="primary-button" type="button" onClick={saveMemory}>Save memory</button>
-                  <button className="secondary-button" type="button" onClick={() => setSelectedTicketId(null)}>Close</button>
-                </div>
-              </div>
-            )}
+              )}
+            </section>
           </div>
-        </div>
-      )}
-
-      {redeemTicketId && (
-        <div className="ticket-modal-backdrop" role="presentation" onClick={() => setRedeemTicketId(null)}>
-          <div className="redeem-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <p className="eyebrow">🎟️ REDEEM DATE PASS</p>
-            <h3>Are you sure you want to redeem this date ticket?</h3>
-            <p>Once redeemed, you can schedule your date.</p>
-            <div className="modal-actions">
-              <button className="primary-button" type="button" onClick={redeemTicket}>Yes, redeem it</button>
-              <button className="secondary-button" type="button" onClick={() => setRedeemTicketId(null)}>Not yet</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="date-tickets-footer">
-        <button type="button" className="secondary-button" onClick={goHome}>← Back to Dashboard</button>
+        )}
       </div>
-    </section>
+    </Module>
   )
 }
 
@@ -2332,14 +1775,14 @@ function Today({ session, go }: { session: Session; go: (page: Page) => void }) 
   return (
     <section className="today-page">
       <section className="welcome">
-        <div className="welcome-copy">
+        <div>
           <p className="eyebrow">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
           <h1>
             Welcome back <span>♡</span>
           </h1>
           <p className="intro">A gentle moment to notice how you are, today.</p>
         </div>
-        <div className="date-orb" aria-label={`Today is ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`}>
+        <div className="date-orb">
           <CalendarDays size={21} />
           <strong>{new Date().getDate()}</strong>
           <span>{new Date().toLocaleDateString('en-US', { month: 'short' })}</span>
@@ -2354,28 +1797,26 @@ function Today({ session, go }: { session: Session; go: (page: Page) => void }) 
           </div>
           <div className="brief-card-body">
             <div className="brief-summary">
-              <div className="brief-header-copy">
-                <p className="brief-greeting">Good morning, Hazel 🌸</p>
+              <div>
+                <p>Good morning, Hazel 🌸</p>
                 <h2>Cycle day 12</h2>
               </div>
               <span className="brief-pill">Low energy</span>
             </div>
-
             <div className="brief-metrics">
-              <div className="metric-block">
+              <div>
                 <span>Sleep</span>
                 <strong>7h 42m</strong>
               </div>
-              <div className="metric-block">
+              <div>
                 <span>Mood</span>
                 <strong>Good</strong>
               </div>
-              <div className="metric-block">
+              <div>
                 <span>Medication</span>
                 <strong>8:00 PM</strong>
               </div>
             </div>
-
             <p className="brief-tip">Take gentle care of yourself today. Keep your rhythm steady and let rest be part of your plan.</p>
           </div>
         </article>
@@ -2694,7 +2135,7 @@ function App() {
         {page === 'Insights' && <Insights session={session} goHome={goHome} />}
         {page === 'OurSpace' && <OurSpaceDashboard session={session} goHome={goHome} go={go} />}
         {page === 'Messages' && <MessagesPage session={session} goHome={goHome} />}
-        {page === 'DateTickets' && <DateTicketsPage goHome={goHome} />}
+        {page === 'DateTickets' && <DateTicketsPage session={session} goHome={goHome} />}
         {page === 'DateVault' && <DateVaultPage goHome={goHome} />}
         {page === 'PersonalSettings' && <PersonalSettings session={session} onSignOut={() => void client.auth.signOut()} goHome={goHome} />}
         {page === 'CoupleSettings' && <CoupleSettings session={session} goHome={goHome} />}

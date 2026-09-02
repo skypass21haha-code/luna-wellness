@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Sparkles } from 'lucide-react'
-import { affirmations, affirmationFallback, type Affirmation } from '../data/affirmations'
+import { affirmations, affirmationFallback, type Affirmation, type AffirmationCategory } from '../data/affirmations'
 import { getAffirmationDateKey } from '../lib/affirmationService'
 
 type DailyAffirmationProps = {
@@ -12,20 +12,31 @@ function hashDay(value: string) {
   return [...value].reduce((hash, character) => ((hash * 31) + character.charCodeAt(0)) >>> 0, 7)
 }
 
+function preferredCategories(hour: number): AffirmationCategory[] {
+  if (hour >= 5 && hour < 12) return ['hope', 'calm', 'balance', 'self_compassion', 'growth']
+  if (hour >= 12 && hour < 17) return ['confidence', 'courage', 'boundaries', 'growth', 'patience']
+  if (hour >= 17 && hour < 22) return ['rest', 'calm', 'hope', 'resilience', 'balance']
+  return ['rest', 'calm', 'self_compassion', 'hope', 'resilience']
+}
+
 function selectDailyAffirmation(userId: string, date: string): Affirmation {
   try {
+    const hour = new Date().getHours()
     const key = stateKey(userId)
     const saved = JSON.parse(localStorage.getItem(key) || '{}') as { day?: string; id?: string; recent?: string[] }
     if (saved.day === date && saved.id) {
       return affirmations.find((affirmation) => affirmation.id === saved.id) || affirmationFallback
     }
 
+    const preferred = preferredCategories(hour)
+    const pool = affirmations.filter((affirmation) => preferred.includes(affirmation.category))
+    const source = pool.length > 0 ? pool : affirmations
     const recent = new Set(saved.recent || [])
-    const start = hashDay(`${userId}:${date}`) % affirmations.length
-    let selected = affirmations[start] || affirmationFallback
-    for (let offset = 0; offset < affirmations.length; offset += 1) {
-      const candidate = affirmations[(start + offset) % affirmations.length]
-      if (!recent.has(candidate.id) || recent.size >= affirmations.length - 1) {
+    const start = hashDay(`${userId}:${date}:${hour}`) % source.length
+    let selected = source[start] || affirmationFallback
+    for (let offset = 0; offset < source.length; offset += 1) {
+      const candidate = source[(start + offset) % source.length]
+      if (!recent.has(candidate.id) || recent.size >= source.length - 1) {
         selected = candidate
         break
       }
