@@ -52,7 +52,7 @@ import {
 } from './lib/partnerService'
 
 type Session = NonNullable<Awaited<ReturnType<NonNullable<typeof supabase>['auth']['getSession']>>['data']['session']>
-type Page = 'Today' | 'Cycle' | 'Symptoms' | 'Medication' | 'Journal' | 'Insights' | 'OurSpace' | 'Messages' | 'DateTickets' | 'DateVault' | 'PersonalSettings' | 'CoupleSettings'
+type Page = 'Today' | 'Cycle' | 'Symptoms' | 'Medication' | 'Mood' | 'Sleep' | 'SelfCare' | 'Hydration' | 'Movement' | 'Nutrition' | 'Journal' | 'Notes' | 'Insights' | 'Reminders' | 'Notifications' | 'OurSpace' | 'Messages' | 'DateTickets' | 'DateVault' | 'PersonalSettings' | 'CoupleSettings'
 type PartnerConnectionStatus = 'not_connected' | 'request_sent' | 'request_received' | 'connected' | 'declined' | 'disconnected'
 type PartnerMessage = { id: string; senderId: string; content: string; createdAt: string; readAt?: string }
 type PartnerState = { status: PartnerConnectionStatus; myCode: string; partnerUserId?: string; partnerName?: string; partnerCode?: string; connectedAt?: string; unreadCount: number; messages: PartnerMessage[] }
@@ -946,6 +946,388 @@ function Journal({ session, goHome }: { session: Session; goHome: () => void }) 
             </div>
           )}
         </section>
+      </div>
+    </Module>
+  )
+}
+
+function MoodPage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [form, setForm] = useState({ mood: 'Good', energy: 7, stress: 3, feelings: '', notes: '' })
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState('')
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setBusy(true)
+    const result = await supabase.from('mood_logs').upsert({
+      user_id: session.user.id,
+      logged_on: today(),
+      mood: form.mood,
+      energy: Number(form.energy),
+      pain: 0,
+      notes: `${form.feelings}${form.notes ? ` — ${form.notes}` : ''}`.trim() || null,
+    }, { onConflict: 'user_id,logged_on' })
+    setBusy(false)
+    setStatus(result.error ? messageForError() : 'Mood saved ✓')
+  }
+
+  return (
+    <Module title="Mood" eyebrow="😌 HOW YOU FEEL" onHome={goHome}>
+      <div className="module-grid">
+        <section className="module-card">
+          <h2>Today’s mood</h2>
+          <form className="module-form" onSubmit={save}>
+            <label className="module-field">Mood
+              <select value={form.mood} onChange={(event) => setForm((current) => ({ ...current, mood: event.target.value }))}>
+                <option>Low</option><option>Okay</option><option>Good</option><option>Great</option>
+              </select>
+            </label>
+            <Field label="Energy (1-10)" type="number" value={String(form.energy)} onChange={(value) => setForm((current) => ({ ...current, energy: Number(value) || 1 }))} />
+            <Field label="Stress (1-10)" type="number" value={String(form.stress)} onChange={(value) => setForm((current) => ({ ...current, stress: Number(value) || 1 }))} />
+            <Field label="Feelings" value={form.feelings} onChange={(value) => setForm((current) => ({ ...current, feelings: value }))} />
+            <Field label="Notes" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Save mood'}</button>
+          </form>
+          {status && <p className="status-line">{status}</p>}
+        </section>
+      </div>
+    </Module>
+  )
+}
+
+function SleepPage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [form, setForm] = useState({ bedtime: '22:30', wake_time: '07:00', quality: 'Good', notes: '' })
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState('')
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setBusy(true)
+    const result = await supabase.from('sleep_logs').upsert({
+      user_id: session.user.id,
+      logged_on: today(),
+      quality: form.quality,
+      bedtime: new Date(`${today()}T${form.bedtime}:00`).toISOString(),
+      wake_time: new Date(`${today()}T${form.wake_time}:00`).toISOString(),
+      notes: form.notes || null,
+      duration_minutes: Math.max(0, Math.round(((new Date(`${today()}T${form.wake_time}:00`).getTime() - new Date(`${today()}T${form.bedtime}:00`).getTime()) / 60000))),
+    }, { onConflict: 'user_id,logged_on' })
+    setBusy(false)
+    setStatus(result.error ? messageForError() : 'Sleep log saved ✓')
+  }
+
+  return (
+    <Module title="Sleep" eyebrow="😴 REST & RECOVERY" onHome={goHome}>
+      <div className="module-grid">
+        <section className="module-card">
+          <h2>Log sleep</h2>
+          <form className="module-form" onSubmit={save}>
+            <Field label="Bedtime" type="time" value={form.bedtime} onChange={(value) => setForm((current) => ({ ...current, bedtime: value }))} />
+            <Field label="Wake time" type="time" value={form.wake_time} onChange={(value) => setForm((current) => ({ ...current, wake_time: value }))} />
+            <label className="module-field">Sleep quality
+              <select value={form.quality} onChange={(event) => setForm((current) => ({ ...current, quality: event.target.value }))}>
+                <option>Poor</option><option>Fair</option><option>Good</option><option>Excellent</option>
+              </select>
+            </label>
+            <Field label="Notes" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Save sleep log'}</button>
+          </form>
+          {status && <p className="status-line">{status}</p>}
+        </section>
+      </div>
+    </Module>
+  )
+}
+
+function SelfCarePage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [form, setForm] = useState({ title: 'Take a break', notes: '' })
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState('')
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setBusy(true)
+    const result = await supabase.from('self_care_logs').insert({
+      user_id: session.user.id,
+      activity: form.title,
+      notes: form.notes || null,
+      logged_at: new Date().toISOString(),
+    })
+    setBusy(false)
+    setStatus(result.error ? messageForError() : 'Self-care moment saved ✓')
+  }
+
+  return (
+    <Module title="Self-Care" eyebrow="🧘 SMALL CARE" onHome={goHome}>
+      <div className="module-grid">
+        <section className="module-card">
+          <h2>Choose a gentle reset</h2>
+          <form className="module-form" onSubmit={save}>
+            <label className="module-field">Activity
+              <select value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}>
+                <option>Take a break</option><option>Quiet time</option><option>Relax</option><option>Shower</option><option>Skincare</option><option>Breathing</option><option>Reading</option><option>Music</option><option>Journaling</option><option>Talk to someone</option>
+              </select>
+            </label>
+            <Field label="Notes" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Save self-care moment'}</button>
+          </form>
+          {status && <p className="status-line">{status}</p>}
+        </section>
+      </div>
+    </Module>
+  )
+}
+
+function HydrationPage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [amount, setAmount] = useState('250')
+  const [status, setStatus] = useState('')
+
+  async function addWater(nextAmount: number) {
+    if (!supabase) return
+    const result = await supabase.from('hydration_logs').insert({
+      user_id: session.user.id,
+      amount_ml: nextAmount,
+      logged_at: new Date().toISOString(),
+    })
+    setStatus(result.error ? messageForError() : `Hydration logged: +${nextAmount} ml ✓`)
+  }
+
+  return (
+    <Module title="Hydration" eyebrow="💧 GENTLE HYDRATION" onHome={goHome}>
+      <div className="module-grid">
+        <section className="module-card">
+          <h2>Daily water</h2>
+          <div className="action-buttons">
+            <button className="primary-button" type="button" onClick={() => void addWater(250)}>+250 ml</button>
+            <button className="secondary-button" type="button" onClick={() => void addWater(500)}>+500 ml</button>
+          </div>
+          <div className="module-form" style={{ marginTop: 16 }}>
+            <Field label="Custom amount (ml)" type="number" value={amount} onChange={setAmount} />
+            <button className="primary-button" type="button" onClick={() => void addWater(Number(amount) || 250)}>Log custom amount</button>
+          </div>
+          {status && <p className="status-line">{status}</p>}
+        </section>
+      </div>
+    </Module>
+  )
+}
+
+function MovementPage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [form, setForm] = useState({ activity: 'Walking', duration: '20', notes: '' })
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setBusy(true)
+    const result = await supabase.from('movement_logs').insert({
+      user_id: session.user.id,
+      activity: form.activity,
+      duration_minutes: Number(form.duration) || 15,
+      notes: form.notes || null,
+      logged_at: new Date().toISOString(),
+    })
+    setBusy(false)
+    setStatus(result.error ? messageForError() : 'Movement saved ✓')
+  }
+
+  return (
+    <Module title="Movement" eyebrow="🏃 GENTLE MOTION" onHome={goHome}>
+      <div className="module-grid">
+        <section className="module-card">
+          <h2>Record movement</h2>
+          <form className="module-form" onSubmit={save}>
+            <label className="module-field">Activity
+              <select value={form.activity} onChange={(event) => setForm((current) => ({ ...current, activity: event.target.value }))}>
+                <option>Walking</option><option>Stretching</option><option>Mobility</option><option>Exercise</option><option>Other movement</option>
+              </select>
+            </label>
+            <Field label="Duration (minutes)" type="number" value={form.duration} onChange={(value) => setForm((current) => ({ ...current, duration: value }))} />
+            <Field label="Notes" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Save movement'}</button>
+          </form>
+          {status && <p className="status-line">{status}</p>}
+        </section>
+      </div>
+    </Module>
+  )
+}
+
+function NutritionPage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [form, setForm] = useState({ meal: 'Breakfast', notes: '', feeling: 'Good' })
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setBusy(true)
+    const result = await supabase.from('nutrition_logs').insert({
+      user_id: session.user.id,
+      meal_type: form.meal,
+      notes: form.notes || null,
+      how_i_felt: form.feeling,
+      logged_at: new Date().toISOString(),
+    })
+    setBusy(false)
+    setStatus(result.error ? messageForError() : 'Meal logged ✓')
+  }
+
+  return (
+    <Module title="Nutrition" eyebrow="🍽️ NOURISHMENT" onHome={goHome}>
+      <div className="module-grid">
+        <section className="module-card">
+          <h2>Meal check-in</h2>
+          <form className="module-form" onSubmit={save}>
+            <label className="module-field">Meal
+              <select value={form.meal} onChange={(event) => setForm((current) => ({ ...current, meal: event.target.value }))}>
+                <option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snack</option>
+              </select>
+            </label>
+            <Field label="Food notes" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+            <label className="module-field">How did it feel?
+              <select value={form.feeling} onChange={(event) => setForm((current) => ({ ...current, feeling: event.target.value }))}>
+                <option>Good</option><option>Comfortable</option><option>Heavy</option><option>Light</option>
+              </select>
+            </label>
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Log meal'}</button>
+          </form>
+          {status && <p className="status-line">{status}</p>}
+        </section>
+      </div>
+    </Module>
+  )
+}
+
+function NotesPage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const [form, setForm] = useState({ title: '', content: '', tags: '' })
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState('')
+
+  async function save(event: FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setBusy(true)
+    const result = await supabase.from('notes').insert({
+      user_id: session.user.id,
+      title: form.title || 'Untitled note',
+      content: form.content,
+      tags: form.tags.split(',').map((item) => item.trim()).filter(Boolean),
+      created_at: new Date().toISOString(),
+    })
+    setBusy(false)
+    setStatus(result.error ? messageForError() : 'Note saved ✓')
+  }
+
+  return (
+    <Module title="Notes" eyebrow="📝 PRIVATE NOTES" onHome={goHome}>
+      <div className="module-grid">
+        <section className="module-card">
+          <h2>Write a private note</h2>
+          <form className="module-form" onSubmit={save}>
+            <Field label="Title" value={form.title} onChange={(value) => setForm((current) => ({ ...current, title: value }))} />
+            <label className="module-field">Content
+              <textarea value={form.content} onChange={(event) => setForm((current) => ({ ...current, content: event.target.value }))} />
+            </label>
+            <Field label="Tags (comma separated)" value={form.tags} onChange={(value) => setForm((current) => ({ ...current, tags: value }))} />
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Save note'}</button>
+          </form>
+          {status && <p className="status-line">{status}</p>}
+        </section>
+      </div>
+    </Module>
+  )
+}
+
+function RemindersPage({ session, goHome }: { session: Session; goHome: () => void }) {
+  const { rows, setRows, loading, error } = useRows<{ id: string; title: string; notes: string | null; scheduled_for: string; category: string; enabled: boolean }>('wellness_reminders', session, 'scheduled_for')
+  const [form, setForm] = useState({ title: 'Journal', notes: '', scheduled_for: '20:00', category: 'Journal', enabled: true })
+  const [status, setStatus] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function addReminder(event: FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setBusy(true)
+    const result = await supabase.from('wellness_reminders').insert({
+      user_id: session.user.id,
+      title: form.title,
+      category: form.category,
+      notes: form.notes || null,
+      scheduled_for: `${today()}T${form.scheduled_for}:00`,
+      enabled: form.enabled,
+    }).select().single()
+    setBusy(false)
+    if (!result.error && result.data) setRows((current) => [result.data as typeof current[number], ...current])
+    setStatus(result.error ? messageForError() : 'Reminder saved ✓')
+  }
+
+  return (
+    <Module title="Reminders" eyebrow="🔔 YOUR SUPPORT" onHome={goHome}>
+      <div className="module-grid">
+        <section className="module-card">
+          <h2>Schedule a reminder</h2>
+          <form className="module-form" onSubmit={addReminder}>
+            <Field label="Name" value={form.title} onChange={(value) => setForm((current) => ({ ...current, title: value }))} />
+            <Field label="Time" type="time" value={form.scheduled_for} onChange={(value) => setForm((current) => ({ ...current, scheduled_for: value }))} />
+            <label className="module-field">Category
+              <select value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}>
+                <option>Medication</option><option>Journal</option><option>Hydration</option><option>Sleep</option><option>Self-Care</option>
+              </select>
+            </label>
+            <Field label="Notes" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} />
+            <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Saving...' : 'Add reminder'}</button>
+          </form>
+          {status && <p className="status-line">{status}</p>}
+        </section>
+
+        <section className="module-card">
+          <h2>Upcoming reminders</h2>
+          {loading || error || rows.length === 0 ? (
+            <StateMessage loading={loading} error={error} empty="No reminders yet." />
+          ) : (
+            <div className="record-list">
+              {rows.map((row) => (
+                <div className="record" key={row.id}>
+                  <div>
+                    <strong>{row.title}</strong>
+                    <small>{row.category} · {new Date(row.scheduled_for).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small>
+                    {row.notes && <p>{row.notes}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </Module>
+  )
+}
+
+function NotificationCenterPage({ goHome }: { goHome: () => void }) {
+  const [items] = useState([
+    { title: '💊 Medication Reminder', message: 'Your scheduled medication reminder is coming up.', time: new Date().toISOString(), feature: 'Medication', unread: true, action: 'View Medication' },
+    { title: '💧 Hydration', message: 'Take a moment to hydrate and reset.', time: new Date().toISOString(), feature: 'Hydration', unread: false, action: 'Log Water' },
+    { title: '📖 Journal', message: 'Take a quiet minute to reflect on your day.', time: new Date().toISOString(), feature: 'Journal', unread: true, action: 'Open Journal' },
+  ])
+
+  return (
+    <Module title="Notifications" eyebrow="🔔 DAILY CENTER" onHome={goHome}>
+      <div className="module-grid">
+        {items.map((item) => (
+          <section key={item.title} className="module-card">
+            <h2>{item.title}</h2>
+            <p>{item.message}</p>
+            <small>{new Date(item.time).toLocaleString()} · {item.feature}</small>
+            <div className="action-buttons">
+              <button className="primary-button" type="button">{item.action}</button>
+            </div>
+          </section>
+        ))}
       </div>
     </Module>
   )
@@ -1978,8 +2360,27 @@ function App() {
     { label: 'Cycle' as Page, icon: Moon },
     { label: 'Symptoms' as Page, icon: Activity },
     { label: 'Medication' as Page, icon: Pill },
+    { label: 'Mood' as Page, icon: Heart },
+    { label: 'Sleep' as Page, icon: Moon },
+  ]
+
+  const dailyCareNav = [
+    { label: 'SelfCare' as Page, icon: Sparkles },
+    { label: 'Hydration' as Page, icon: Leaf },
+    { label: 'Movement' as Page, icon: Activity },
+    { label: 'Nutrition' as Page, icon: Leaf },
+    { label: 'Notifications' as Page, icon: Bell },
+  ]
+
+  const reflectionNav = [
     { label: 'Journal' as Page, icon: BookHeart },
+    { label: 'Notes' as Page, icon: SettingsIcon },
     { label: 'Insights' as Page, icon: Sparkles },
+  ]
+
+  const supportNav = [
+    { label: 'Reminders' as Page, icon: Bell },
+    { label: 'PersonalSettings' as Page, icon: SettingsIcon },
   ]
 
   const coupleNav = [
@@ -2060,7 +2461,43 @@ function App() {
               ))}
             </div>
           </div>
-          
+
+          <div className="nav-section">
+            <span className="nav-section-label">🌿 DAILY CARE</span>
+            <div className="nav-items">
+              {dailyCareNav.map(({ label, icon: Icon }) => (
+                <button key={label} className={page === label ? 'nav-item active' : 'nav-item'} onClick={() => go(label)}>
+                  <Icon size={18} />
+                  <span>{label === 'SelfCare' ? 'Self-Care' : label === 'Hydration' ? 'Hydration' : label === 'Movement' ? 'Movement' : label === 'Nutrition' ? 'Nutrition' : 'Notifications'}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="nav-section">
+            <span className="nav-section-label">📖 REFLECTION</span>
+            <div className="nav-items">
+              {reflectionNav.map(({ label, icon: Icon }) => (
+                <button key={label} className={page === label ? 'nav-item active' : 'nav-item'} onClick={() => go(label)}>
+                  <Icon size={18} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="nav-section">
+            <span className="nav-section-label">🔔 SUPPORT</span>
+            <div className="nav-items">
+              {supportNav.map(({ label, icon: Icon }) => (
+                <button key={label} className={page === label ? 'nav-item active' : 'nav-item'} onClick={() => go(label)}>
+                  <Icon size={18} />
+                  <span>{label === 'PersonalSettings' ? 'Settings' : label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="nav-section">
             <span className="nav-section-label">♡ OUR SPACE</span>
             <div className="nav-items">
@@ -2071,13 +2508,6 @@ function App() {
                 </button>
               ))}
             </div>
-          </div>
-          
-          <div className="nav-section">
-            <button className="nav-item settings-nav" onClick={() => go('PersonalSettings')}>
-              <SettingsIcon size={18} />
-              <span>Settings</span>
-            </button>
           </div>
         </nav>
 
@@ -2131,8 +2561,17 @@ function App() {
         {page === 'Cycle' && <Cycle session={session} goHome={goHome} />}
         {page === 'Symptoms' && <Symptoms session={session} goHome={goHome} />}
         {page === 'Medication' && <Medication session={session} goHome={goHome} onTestReminder={(kind = 'due') => { scheduleTest?.(10000, kind) }} />}
+        {page === 'Mood' && <MoodPage session={session} goHome={goHome} />}
+        {page === 'Sleep' && <SleepPage session={session} goHome={goHome} />}
+        {page === 'SelfCare' && <SelfCarePage session={session} goHome={goHome} />}
+        {page === 'Hydration' && <HydrationPage session={session} goHome={goHome} />}
+        {page === 'Movement' && <MovementPage session={session} goHome={goHome} />}
+        {page === 'Nutrition' && <NutritionPage session={session} goHome={goHome} />}
         {page === 'Journal' && <Journal session={session} goHome={goHome} />}
+        {page === 'Notes' && <NotesPage session={session} goHome={goHome} />}
         {page === 'Insights' && <Insights session={session} goHome={goHome} />}
+        {page === 'Reminders' && <RemindersPage session={session} goHome={goHome} />}
+        {page === 'Notifications' && <NotificationCenterPage goHome={goHome} />}
         {page === 'OurSpace' && <OurSpaceDashboard session={session} goHome={goHome} go={go} />}
         {page === 'Messages' && <MessagesPage session={session} goHome={goHome} />}
         {page === 'DateTickets' && <DateTicketsPage session={session} goHome={goHome} />}
